@@ -5196,13 +5196,19 @@ export function SessionChat({
                 onCompactClick={runtimeCanCompact ? handleCompactClick : undefined}
                 quoteRequests={quoteRequests}
                 onQuoteRequestsApplied={handleQuoteRequestsApplied}
-                // Only lock the input into question-answer mode while the session is
-                // actually busy (a live question keeps the run busy). If a question
-                // chip is ever showing while the session is idle — e.g. a dead /
-                // abandoned question the agent left behind — the input stays unlocked
-                // so a typed message is sent to the agent instead of being swallowed
-                // as a custom answer.
-                lockForQuestion={!!renderedQuestion && isBusy}
+                // A question card owns the composer whenever it is on screen: typed
+                // text is that question's custom answer, on a busy session (a live
+                // ask) and on an idle one (the card draws a parked ask or the ask
+                // the runtime still holds). The pending list (`pendingQuestions`)
+                // only contains questions the answer path can reach — the runtime
+                // question store and the parked asks API — so a card that renders
+                // is always the answer target. The composer unlocks the frame the
+                // card disappears: its answer accepts the typed text once, the
+                // card hides synchronously on the reply, and the 320 ms fade is
+                // the remaining delay. KRTX-4450: requiring isBusy here let a
+                // typed answer escape as a plain user prompt while the card
+                // stayed up — the recording that filed this issue.
+                lockForQuestion={!!renderedQuestion}
                 // Same dead-prompt guard as questions: only lock while the agent is
                 // actually paused on the decision (isBusy), so a stale card can't
                 // swallow the composer on an idle session.

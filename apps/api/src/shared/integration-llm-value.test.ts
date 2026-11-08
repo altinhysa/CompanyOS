@@ -94,7 +94,7 @@ test('SQL values reconcile with sources; estimates never alter charges or duplic
 // keep inserting rows after the one-shot backfill ran. Their INSERT predates
 // the promoted columns — the flag rides in metadata only — and the table is
 // insert-only, so nothing heals them later. The fill trigger
-// (20261108081025000) lifts the key at insert; without it the gate reads the
+// (20261108090000200) lifts the key at insert; without it the gate reads the
 // row as not-estimated and prices a usage its own writer marked estimated.
 test('a row the old writer inserts during the rollout (the key in metadata, no column) stays unpriced', async () => {
   const id = crypto.randomUUID();

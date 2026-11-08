@@ -9,7 +9,7 @@
 // ends when a batch changes nothing.
 //
 // KRTX-4023, step 2 of the promotion. Fills the columns
-// 20261104054916390_gateway_logs_served_model_usage_estimated.sql added, from
+// 20261108090000000_gateway_logs_served_model_usage_estimated.sql added, from
 // the metadata keys the gateway writer has always carried:
 //
 //   served_model    <- metadata->>'servedModel'   (hooks.ts persistGatewayTrace)
@@ -28,7 +28,7 @@
 // pass has healed every row the OLD writer produced before it. Rows the old
 // writer produces during the deploy window (after the last batch, before the
 // new pods' first write) are healed by the fill trigger in
-// 20261108081025000, which lifts the same keys into the columns at insert for
+// 20261108090000200, which lifts the same keys into the columns at insert for
 // every writer version.
 
 export const shorthands = undefined;

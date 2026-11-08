@@ -4,7 +4,7 @@
 // a transaction, and every plain .sql migration here runs inside the single
 // batch transaction node-pg-migrate wraps around `pnpm migrate`
 // (singleTransaction: true). See
-// 20261104060001000_gateway_logs_project_time_covering_llm.concurrent.ts for
+// 20261108090000300_gateway_logs_project_time_covering_v4.concurrent.ts for
 // the full house rules for this file class (one concurrent operation, IF NOT
 // EXISTS, 180s lock_timeout -- lint-enforced --, generous statement_timeout).
 
@@ -20,12 +20,12 @@ export const shorthands = undefined;
 // rollup silently fell back to heap-fetching the wide jsonb rows with its
 // siblings (the whole-dashboard deadline storms of KRTX-4023).
 //
-// The estimated flag is now a REAL column (20261104054916390 + backfill in
-// 20261104060000000); this replacement adds it and the three token/model
+// The estimated flag is now a REAL column (20261108090000000 + backfill in
+// 20261108090000100); this replacement adds it and the three token/model
 // columns to the INCLUDE list over the same (project_id, session_id,
 // created_at) keys and the same `session_id is not null` predicate. Built
-// under a temp name; 20261104060004000 drops the old index and
-// 20261104060005000 restores the canonical name the drizzle schema contract
+// under a temp name; 20261108090000600 drops the old index and
+// 20261108090000700 restores the canonical name the drizzle schema contract
 // declares.
 
 /** @param {import('node-pg-migrate').MigrationBuilder} pgm */

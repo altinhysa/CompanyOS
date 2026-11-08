@@ -41,7 +41,7 @@ export function estimateLlmValue(row: {
 // Same rate snapshot in SQL so all reporting aggregates the same request-level
 // values, never repricing a window's token sum across a context-price boundary.
 // KRTX-4023: the usage-was-estimated gate reads the promoted `usage_estimated`
-// column (real column, written by the gateway writer + the 20261104060000000
+// column (real column, written by the gateway writer + the 20261108090000100
 // backfill), not `metadata->>'usageEstimated'` — a jsonb expression cannot
 // join the covering indexes' INCLUDE lists, so reading metadata here
 // heap-fetches every aggregated row and the dashboard polls cross the 25 s

@@ -6,8 +6,8 @@ set statement_timeout = '30s';
 
 -- WHAT: KRTX-4023, the mixed-version writer guard for the promoted columns
 -- `served_model` / `usage_estimated` (added by
--- 20261104054916390_gateway_logs_served_model_usage_estimated.sql, history
--- healed by the batched backfill 20261104060000000).
+-- 20261108090000000_gateway_logs_served_model_usage_estimated.sql, history
+-- healed by the batched backfill 20261108090000100).
 --
 -- WHY: migrations run before the new pods start, but an ECS rollout replaces
 -- pods gradually — old code keeps inserting rows until its last task drains.

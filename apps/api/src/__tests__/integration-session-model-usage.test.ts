@@ -64,7 +64,7 @@ async function request(input: {
     // KRTX-4023: mirror the real writer (gateway-trace-row.ts) — the served
     // model rides in metadata AND its promoted column. The raw inserts below
     // (no column) keep the pre-promotion INSERT shape; the fill trigger
-    // (20261108081025000) lifts their metadata keys at insert, and the
+    // (20261108090000200) lifts their metadata keys at insert, and the
     // rollout-window test asserts exactly that.
     servedModel: typeof input.metadata?.servedModel === 'string' ? input.metadata.servedModel : null,
     metadata: input.metadata ?? {}, createdAt: at(input.at),
@@ -260,7 +260,7 @@ describe('sessionModelUsage', () => {
   // keep inserting rows after the one-shot backfill ran. Their INSERT predates
   // the promoted columns — the keys ride in metadata only — and the table is
   // insert-only, so nothing heals them later. The fill trigger
-  // (20261108081025000) lifts the keys at insert; without it this row reads
+  // (20261108090000200) lifts the keys at insert; without it this row reads
   // the requested model (the column fallback), not the served one.
   test('a row the old writer inserts during the rollout (metadata keys, no column) names its served model', async () => {
     await session('rollout');

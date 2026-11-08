@@ -46,23 +46,25 @@ export const shorthands = undefined;
 // cached_tokens, cache_write_tokens and the usage-was-estimated flag; the
 // breakdown's group key additionally reads the served model and
 // requested_model; the sources rollup filters account_id and reads
-// session_id. idx_gateway_logs_project_time_covering (20261020080000000)
-// carried none of them, so every gateway overview/series/breakdown/sessions/
-// sources scan silently fell back to heap-fetching the wide request/response
-// jsonb rows, and a busy project's dashboard polls crossed the 25 s statement
-// timeout as 5xx (whole-dashboard deadline storms).
+// session_id. The trunk's v2/v3 rebuilds (KRTX-4022, KRTX-4449:
+// 20261107145000000, 20261107164457464) made those scans index-only again by
+// including the whole `metadata` jsonb (writer-bounded to 2000 bytes/row) —
+// but `metadata` cannot carry a promoted COLUMN read, and requested_model
+// left the INCLUDE list, so the breakdown still heap-fetched every row of
+// its window.
 //
 // The served model and the estimated flag are now REAL columns
-// (20261104054916390 + the backfill in 20261104060000000) — a jsonb
+// (20261108090000000 + the backfill in 20261108090000100) — a jsonb
 // expression cannot join an INCLUDE list, and a btree expression key never
 // serves an index-only scan (verified on PG 17.6), so columns were the only
-// path back to index-only. This replacement carries every column the
+// path back to a tight index-only plan. v4 carries every scalar column the
 // aggregates read as plain INCLUDE columns over the same (project_id,
-// created_at) keys. Built under a temp name (the final name is still held by
-// the old index); 20261104060003000 and 20261104060004000 drop the old
-// indexes and 20261104060005000 restores the canonical names the drizzle
-// schema contract declares. WITH ISVALID: if you're re-running this file by
-// hand after an INVALID build, drop the invalid index first.
+// created_at) keys, DROPS `metadata` (the promoted pair replaces the only
+// two keys the aggregates ever read from it — the 2 KB/row index-tuple cost
+// of v2/v3 leaves the hottest write path) and restores `requested_model` for
+// the breakdown's fallback arm. 20261108090000500 drops v3: v4 carries every
+// scalar v3 carried. WITH ISVALID: if you're re-running this file by hand
+// after an INVALID build, drop the invalid index first.
 //
 // The visibility map must be current for an index-only scan; the table is
 // insert-only and autovacuum maintains it.
@@ -79,7 +81,7 @@ export const up = (pgm) => {
   pgm.sql(`set lock_timeout = '180s'`);
   pgm.sql(`set statement_timeout = '30min'`);
   pgm.sql(`
-    create index concurrently if not exists idx_gateway_logs_project_time_covering_llm
+    create index concurrently if not exists idx_gateway_logs_project_time_covering_v4
       on kortix.gateway_request_logs (project_id, created_at)
       include (account_id, session_id, ok, provider, requested_model,
                resolved_model, served_model, usage_estimated, billing_mode,

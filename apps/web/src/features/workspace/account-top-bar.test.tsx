@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
+import { AccountTopBar } from './account-top-bar';
 import { parseSettingsTab, type SettingsTab } from '@kortix/ui/customize/settings/settings-tabs';
 
 /**
@@ -93,5 +96,51 @@ describe('AccountTopBar Inbox button', () => {
     const button = await source('../notifications/inbox-button.tsx');
     expect(button).toContain("ACCOUNT_INBOX_HREF = '/inbox'");
     expect(button).toContain('href={ACCOUNT_INBOX_HREF}');
+  });
+});
+
+/**
+ * KRTX-4492: the profile picture did not reach the identity trigger — the bar
+ * rendered text-only on `/workspaces` and `/workspaces/new` even after an
+ * upload on /settings/profile. The trigger (unlike the menu rows) is NOT
+ * portalled, so a static render reaches it. Radix's Avatar draws the bitmap
+ * `<img>` client-side only (fingerprinted after load), which a static render
+ * cannot observe; the browser journey (39-profile-avatar-user-menu.spec.ts)
+ * asserts the rendered `<img>` with the stored URL.
+ */
+describe('AccountTopBar identity avatar', () => {
+  /**
+   * The uploaded picture must reach the bar. Both callers read the same
+   * Supabase identity field the profile tab writes (`user_metadata.avatar_url`,
+   * `profile-tab.tsx`); the prop is the only path into the component.
+   */
+  test('the callers pass the profile picture the settings tab stores', async () => {
+    const read = async (file: string) => {
+      const text = await Bun.file(new URL(file, import.meta.url)).text();
+      return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    };
+    const newPage = await read('../../features/workspace/new/new-workspace-page.tsx');
+    expect(newPage).toContain('user?.user_metadata?.avatar_url');
+    const selector = await read('../../features/workspace/project-selector/project-selector.tsx');
+    expect(selector).toContain('user?.user_metadata?.avatar_url');
+  });
+
+  const render = (props?: Partial<React.ComponentProps<typeof AccountTopBar>>) =>
+    renderToStaticMarkup(
+      createElement(AccountTopBar, {
+        email: 'user@example.test',
+        name: 'Demo User',
+        signingOut: false,
+        onLogOut: () => {},
+        ...props,
+      }),
+    );
+
+  test('the trigger renders the identity avatar tile', () => {
+    expect(render({ avatarUrl: 'https://pics.example.test/u.png' })).toContain('data-slot="avatar"');
+  });
+
+  test('the avatar renders without a picture too: the initials tile of every other surface', () => {
+    expect(render()).toContain('data-slot="avatar"');
   });
 });

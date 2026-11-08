@@ -54,6 +54,7 @@ import {
   DropdownMenuTrigger,
 } from '@kortix/ui/dropdown-menu';
 import { EntityAvatar } from '@kortix/ui/entity-avatar';
+import { UserAvatar } from '@kortix/ui/user-avatar';
 import {
   SidebarContext,
   SidebarMenu,
@@ -331,8 +332,20 @@ export function WorkspaceSwitcher({ projectId }: { projectId: string }) {
             <LogOut />
             <span className="flex min-w-0 flex-1 flex-col">
               <span>{t('workspace.logOut')}</span>
-              {/* Which session Log out ends (KRTX-1810). */}
-              {identity ? <span className="text-muted-foreground truncate text-xs">{identity}</span> : null}
+              {/* Which session Log out ends (KRTX-1810), with the picture
+                  Settings → Profile stored (KRTX-4492): the shell's one "you"
+                  line reads the same auth metadata the account top bar does. */}
+              {identity ? (
+                <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
+                  <UserAvatar
+                    email={user?.email ?? ''}
+                    name={identity}
+                    avatarUrl={user?.user_metadata?.avatar_url ?? null}
+                    size="xs"
+                  />
+                  <span className="min-w-0 truncate">{identity}</span>
+                </span>
+              ) : null}
             </span>
           </DropdownMenuItem>
         );

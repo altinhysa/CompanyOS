@@ -80,7 +80,7 @@ const BILLED_BY_KORTIX = `coalesce(
              case when final_cost_precise > 0 then 'credits' else 'none' end
            ) = 'credits'`;
 const TOTAL_SPEND = `coalesce(sum(final_cost_precise + (case when ${BILLED_BY_KORTIX} then 0 else upstream_cost_precise end)), 0)::float8`;
-const KORTIX_SPEND = `coalesce(sum(final_cost_precise), 0)::float8`;
+const KORTIX_SPEND = 'coalesce(sum(final_cost_precise), 0)::float8';
 const PROVIDER_SPEND = `coalesce(sum(case when ${BILLED_BY_KORTIX} then 0 else upstream_cost_precise end), 0)::float8`;
 
 /** GET /v1/projects/:id/gateway/overview (gateway-spend.ts): the same
@@ -504,10 +504,10 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       'alter table kortix.gateway_request_logs disable trigger fill_promoted_columns',
     );
     try {
-      await client.query(
-        'insert into kortix.accounts (account_id, name) values ($1, $2)',
-        [edgeAccountId, edgeAccountId],
-      );
+      await client.query('insert into kortix.accounts (account_id, name) values ($1, $2)', [
+        edgeAccountId,
+        edgeAccountId,
+      ]);
       await client.query(
         `insert into kortix.projects (project_id, account_id, name, repo_url)
          values ($1, $2, 'backfill-edge', 'https://example.test/backfill.git')`,
@@ -578,23 +578,24 @@ suite('gateway_request_logs project aggregates are index-only', () => {
         where project_id = $1 order by request_id`,
       [edgeProjectId],
     );
-    expect(Object.fromEntries(edge.map((r) => [r.request_id, [r.served_model, r.usage_estimated]])))
-      .toEqual({
-        // JSON booleans: the writer's shape.
-        'bf-bool-true': ['served-a', true],
-        'bf-bool-false': ['served-a', false],
-        // Absent keys and JSON nulls: NULL, the pre-promotion shape the
-        // readers treat as a missing key.
-        'bf-absent': [null, null],
-        'bf-null-keys': [null, null],
-        // The seed's legacy string shape reads as the flag it renders.
-        'bf-string': ['served-b', true],
-        'bf-sol-estimated': ['codex/gpt-6.1-sol', true],
-        // No usageEstimated key: the column stays NULL (never a guessed false).
-        'bf-sol-reported': ['codex/gpt-6.1-sol', null],
-        // The oversized historical key is bounded, never copied verbatim.
-        'bf-huge-served': ['🚀'.repeat(63), false],
-      });
+    expect(
+      Object.fromEntries(edge.map((r) => [r.request_id, [r.served_model, r.usage_estimated]])),
+    ).toEqual({
+      // JSON booleans: the writer's shape.
+      'bf-bool-true': ['served-a', true],
+      'bf-bool-false': ['served-a', false],
+      // Absent keys and JSON nulls: NULL, the pre-promotion shape the
+      // readers treat as a missing key.
+      'bf-absent': [null, null],
+      'bf-null-keys': [null, null],
+      // The seed's legacy string shape reads as the flag it renders.
+      'bf-string': ['served-b', true],
+      'bf-sol-estimated': ['codex/gpt-6.1-sol', true],
+      // No usageEstimated key: the column stays NULL (never a guessed false).
+      'bf-sol-reported': ['codex/gpt-6.1-sol', null],
+      // The oversized historical key is bounded, never copied verbatim.
+      'bf-huge-served': ['🚀'.repeat(63), false],
+    });
 
     // The backfill's whole contract, on both projects' rows: the promoted
     // readers (columns) must read exactly what the metadata readers read.
@@ -685,7 +686,11 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       `);
       if (!rowCount) break;
     }
-    const { rows: bounded } = await client.query<{ requested_model: string; resolved_model: string; served_model: string | null }>(
+    const { rows: bounded } = await client.query<{
+      requested_model: string;
+      resolved_model: string;
+      served_model: string | null;
+    }>(
       `select requested_model, resolved_model, served_model
          from kortix.gateway_request_logs where request_id = 'bf-oversized'`,
     );
@@ -772,12 +777,18 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       if (!rowCount) break;
     }
 
-    const { rows: after } = await client.query<{ request_id: string; served_model: string | null; usage_estimated: boolean | null }>(
+    const { rows: after } = await client.query<{
+      request_id: string;
+      served_model: string | null;
+      usage_estimated: boolean | null;
+    }>(
       `select request_id, served_model, usage_estimated
          from kortix.gateway_request_logs
         where request_id in ('il-history', 'il-during') order by request_id`,
     );
-    expect(Object.fromEntries(after.map((r) => [r.request_id, [r.served_model, r.usage_estimated]]))).toEqual({
+    expect(
+      Object.fromEntries(after.map((r) => [r.request_id, [r.served_model, r.usage_estimated]])),
+    ).toEqual({
       // History: healed by the backfill.
       'il-history': ['served-x', true],
       // The during-backfill insert: healed by the trigger, unchanged by the

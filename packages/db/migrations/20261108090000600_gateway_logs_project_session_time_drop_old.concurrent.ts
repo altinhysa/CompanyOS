@@ -28,7 +28,7 @@ export const up = (pgm) => {
   // migration's header).
   pgm.sql(`set lock_timeout = '180s'`);
   pgm.sql(`set statement_timeout = '30min'`);
-  pgm.sql(`drop index concurrently if exists kortix.idx_gateway_logs_project_session_time`);
+  pgm.sql('drop index concurrently if exists kortix.idx_gateway_logs_project_session_time');
 };
 
 // Most CONCURRENTLY migrations are one-way in practice (see MIGRATIONS.md --

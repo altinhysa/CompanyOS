@@ -131,6 +131,17 @@ describe('buildGatewayTraceRow', () => {
     expect(Array.from(row.resolvedModel)).toHaveLength(63); // whole code points, never a split surrogate
     expect(row.servedModel).toBe(`a${'X'.repeat(254)}`); // NUL stripped, then bounded
   });
+
+  // G9 round 2: the maximal byte-safe prefix, not an average-width cut — a
+  // string of 255 ASCII bytes followed by astral chars keeps every one of
+  // its 255 ASCII bytes (the helper in the DB must return the identical
+  // prefix for the same input).
+  test('mixed-width strings keep their full byte budget (maximal prefix, not an average cut)', () => {
+    const mixed = 'X'.repeat(255) + '🚀'.repeat(300);
+    const row = buildGatewayTraceRow(baseInput({ requestedModel: mixed }));
+    expect(row.requestedModel).toBe('X'.repeat(255));
+    expect(Buffer.byteLength(row.requestedModel, 'utf8')).toBe(255);
+  });
 });
 
 describe('buildGatewayTraceRow metadata bound (KRTX-4022)', () => {

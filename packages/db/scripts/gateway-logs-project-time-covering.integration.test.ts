@@ -693,6 +693,14 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     expect(Buffer.byteLength(bounded[0]!.requested_model, 'utf8')).toBe(255);
     expect(Buffer.byteLength(bounded[0]!.resolved_model, 'utf8')).toBe(252);
     expect(Buffer.byteLength(bounded[0]!.served_model ?? '', 'utf8')).toBe(252);
+    // G9 round 2: the helper's cut is the maximal byte-safe prefix — the
+    // same prefix the writer's clipText produces for the same input (an
+    // average-width cut would keep 97 of these 255 ASCII bytes).
+    const { rows: helperCut } = await client.query<{ cut: string }>(
+      `select kortix.clip_text_bytes($1 || '🚀'::text, 255) as cut`,
+      ['X'.repeat(255)],
+    );
+    expect(helperCut[0]?.cut).toBe('X'.repeat(255));
     // The bounded history no longer overflows the tuple: the migration's own
     // build statement succeeds.
     await superuser.query(`set statement_timeout = '5min'`);

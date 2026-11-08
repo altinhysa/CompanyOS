@@ -58,16 +58,29 @@ IMMUTABLE
 SET search_path = kortix
 AS $fn$
 DECLARE
-  cut int;
+  lo int;
+  hi int;
+  mid int;
 BEGIN
   IF value IS NULL OR octet_length(value) <= max_bytes THEN
     RETURN value;
   END IF;
-  cut := greatest(max_bytes / 4, (max_bytes::bigint * char_length(value) / octet_length(value))::int);
-  value := left(value, cut);
-  WHILE octet_length(value) > max_bytes LOOP
-    value := left(value, char_length(value) - 1);
+  -- The maximal character prefix within the byte budget, by binary search
+  -- (byte length of left(value, n) is monotonic in n). An average-width cut
+  -- would lose valid prefixes: 255 ASCII chars followed by astral chars
+  -- averages to a fraction of the true budget. left() is character-based,
+  -- so the result is always whole code points — never a mid-character cut,
+  -- never an unpaired surrogate.
+  lo := 0;
+  hi := char_length(value);
+  WHILE lo < hi LOOP
+    mid := (lo + hi + 1) / 2;
+    IF octet_length(left(value, mid)) <= max_bytes THEN
+      lo := mid;
+    ELSE
+      hi := mid - 1;
+    END IF;
   END LOOP;
-  RETURN value;
+  RETURN left(value, lo);
 END;
 $fn$;

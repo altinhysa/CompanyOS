@@ -17,7 +17,7 @@ const ALLOWED = new Set<string>([
   // KRTX-4023: the one-shot batched backfill lifts the two promoted read
   // columns (served_model, usage_estimated) out of the metadata keys. It
   // changes no cost column, so the daily totals stay true.
-  'packages/db/migrations/20261108090000100_gateway_logs_llm_value_backfill.concurrent.ts',
+  'packages/db/migrations/20261108090000200_gateway_logs_llm_value_backfill.concurrent.ts',
 ]);
 
 const MUTATION =

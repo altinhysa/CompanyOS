@@ -105,10 +105,10 @@ function asJson(value: unknown): Record<string, unknown> | null {
  * indexes index-only (a jsonb expression cannot join an INCLUDE list, and a
  * btree expression key never serves an index-only scan on PG 17.6). The
  * metadata keys stay (older replicas and the backfill in
- * 20261108090000100 read them). A missing key reads NULL, which the readers
+ * 20261108090000200 read them). A missing key reads NULL, which the readers
  * treat exactly as the missing metadata key they replaced. Old writers
  * during the rollout window are covered by the insert-time fill trigger
- * (20261108090000200), which lifts the same keys.
+ * (20261108090000100), which lifts the same keys.
  */
 function promotedColumns(metadata: Record<string, unknown> | undefined) {
   return {

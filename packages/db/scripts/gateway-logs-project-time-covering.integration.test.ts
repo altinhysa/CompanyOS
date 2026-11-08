@@ -1,26 +1,28 @@
 /**
  * The project-led gateway aggregates (gateway budgets memberRows/projectAgg,
- * budgetSpends, gateway overview, gateway series) scanned
- * kortix.gateway_request_logs by (project_id, created_at) and heap-fetched
- * every wide jsonb row because idx_gateway_logs_project_time carries none of
- * the aggregated columns. Prod (Better Stack 2346961, 2026-10-18 07:54): the
- * 15-minute budgets poll of a busy project crossed the 25 s statement timeout
- * (503 + error page) while its neighbors ran 2-14 s every poll — the latency
- * is heap I/O. idx_gateway_logs_project_time_covering
- * (20261020080000000) carried every column those aggregates read — until the
- * LLM retail valuation (KRTX-3560, 2026-10-27) composed its per-row case into
- * the same scans: it reads provider, resolved_model, cached_tokens,
- * cache_write_tokens and the usage-was-estimated flag, and the breakdown's
- * group key reads the served model. The flag and the served model lived only
- * inside `metadata` — a jsonb extraction no INCLUDE list can carry, and a
- * btree expression key never serves an index-only scan (verified on PG 17.6:
- * the same predicate over a plain column plans Index Only, over an expression
- * key it plans Bitmap Heap) — so the plans silently fell back to heap-fetching
- * the wide rows (KRTX-4023: whole-dashboard 25 s deadline storms). The two
- * values are now REAL columns (20261104054916390, written by the gateway
- * writer and backfilled by 20261104060000000) and the covering indexes carry
- * them as plain INCLUDE columns (20261104060001000/02000), so the plans are
- * index-only again.
+ * budgetSpends, gateway overview, gateway series, gateway sources, gateway
+ * sessions) scanned kortix.gateway_request_logs by (project_id, created_at)
+ * and heap-fetched every wide jsonb row because idx_gateway_logs_project_time
+ * carries none of the aggregated columns. Prod (Better Stack 2346961,
+ * 2026-10-18 07:54): the 15-minute budgets poll of a busy project crossed the
+ * 25 s statement timeout (503 + error page) while its neighbors ran 2-14 s
+ * every poll — the latency is heap I/O.
+ * idx_gateway_logs_project_time_covering (20261020080000000) carried every
+ * column those aggregates read — until the LLM retail valuation (KRTX-3560,
+ * 2026-10-27) composed its per-row case into the same scans: it reads
+ * provider, resolved_model, cached_tokens, cache_write_tokens and the
+ * usage-was-estimated flag, and the breakdown's group key reads the served
+ * model. The flag and the served model lived only inside `metadata` — a jsonb
+ * extraction no INCLUDE list can carry, and a btree expression key never
+ * serves an index-only scan (verified on PG 17.6: the same predicate over a
+ * plain column plans Index Only, over an expression key it plans Bitmap Heap)
+ * — so the plans silently fell back to heap-fetching the wide rows (KRTX-4023:
+ * whole-dashboard 25 s deadline storms). The two values are now REAL columns
+ * (20261108090000000, written by the gateway writer and backfilled by
+ * 20261108090000100) and the covering indexes carry them as plain INCLUDE
+ * columns: the project-time index is v4 (20261108090000300 — v3's scalar
+ * columns, `metadata` replaced by the promoted pair, requested_model back for
+ * the breakdown's fallback arm), so the plans are index-only again.
  *
  * The assertion reads the live catalog and the live planner (EXPLAIN), never
  * source text: each aggregate's exact shape must plan as an Index Only Scan
@@ -37,24 +39,29 @@ import pg from 'pg';
  * The per-row LLM retail value case, verbatim from
  * apps/api/src/shared/llm-value.ts `rowLlmValueSql` (KRTX-3560, 2026-10-27).
  * KRTX-4023: this case reads the promoted `usage_estimated` column — written
- * by the gateway writer and the 20261104060000000 backfill; the pre-promotion
- * read was `metadata->>'usageEstimated'`, a jsonb expression no INCLUDE list
- * can carry and a btree expression key never serves index-only — plus
- * provider, resolved_model, cached_tokens and cache_write_tokens. Until those
- * live in the covering index, every gateway analytics scan that composes this
- * case heap-fetches its whole (project_id, created_at) window.
+ * by the gateway writer, the 20261108090000100 backfill and the fill trigger
+ * 20261108090000200; the pre-promotion read was
+ * `metadata->>'usageEstimated'`, a jsonb expression no INCLUDE list can carry
+ * and a btree expression key never serves index-only — plus provider,
+ * resolved_model, cached_tokens and cache_write_tokens. Until those live in
+ * the covering index, every gateway analytics scan that composes this case
+ * heap-fetches its whole (project_id, created_at) window. The `p` prefix
+ * renders the same case the way production's query builder emits it inside a
+ * join (the sources aggregate aliases the log table).
  */
-const LLM_VALUE_CASE = `case when
-  provider in ('openai', 'openai-codex') and resolved_model = 'gpt-6.1-sol'
-  and ok and not coalesce(usage_estimated, false)
-  and input_tokens >= 0 and output_tokens >= 0
-  and cached_tokens >= 0 and cache_write_tokens >= 0
-  and cached_tokens + cache_write_tokens <= input_tokens
-  then ((input_tokens - cached_tokens - cache_write_tokens)
-    * case when input_tokens > 272000 then 4::numeric else 2::numeric end
-    + cached_tokens * case when input_tokens > 272000 then 0.2::numeric else 0.1::numeric end
-    + cache_write_tokens * case when input_tokens > 272000 then 5::numeric else 2.5::numeric end
-    + output_tokens * case when input_tokens > 272000 then 15::numeric else 10::numeric end) / 1000000 end`;
+const llmValueCase = (p = '') => `case when
+  ${p}provider in ('openai', 'openai-codex') and ${p}resolved_model = 'gpt-6.1-sol'
+  and ${p}ok and not coalesce(${p}usage_estimated, false)
+  and ${p}input_tokens >= 0 and ${p}output_tokens >= 0
+  and ${p}cached_tokens >= 0 and ${p}cache_write_tokens >= 0
+  and ${p}cached_tokens + ${p}cache_write_tokens <= ${p}input_tokens
+  then ((${p}input_tokens - ${p}cached_tokens - ${p}cache_write_tokens)
+    * case when ${p}input_tokens > 272000 then 4::numeric else 2::numeric end
+    + ${p}cached_tokens * case when ${p}input_tokens > 272000 then 0.2::numeric else 0.1::numeric end
+    + ${p}cache_write_tokens * case when ${p}input_tokens > 272000 then 5::numeric else 2.5::numeric end
+    + ${p}output_tokens * case when ${p}input_tokens > 272000 then 15::numeric else 10::numeric end) / 1000000 end`;
+
+const LLM_VALUE_CASE = llmValueCase();
 
 /** llm-value.ts `llmValueFields`, verbatim: the per-row case never appears raw
  *  in a reporting select — it is always wrapped in sum()/count(), so every
@@ -94,8 +101,8 @@ const OVERVIEW = `
 /** GET /v1/projects/:id/gateway/breakdown (projectSpendByModel,
  *  session-model-usage.ts): llm-value fields + the served-model group key,
  *  which reads the promoted served_model column and falls back to
- *  requested_model/resolved_model when the column is NULL (a row written
- *  before the promotion) — production's servedModelSql, verbatim. Grouped by
+ *  requested_model/resolved_model when the column is NULL (a row that never
+ *  carried the key) — production's servedModelSql, verbatim. Grouped by
  *  the expressions, as production's `.groupBy(servedModelSql, logs.provider)`
  *  renders. */
 const BREAKDOWN = `
@@ -121,9 +128,10 @@ const BREAKDOWN = `
 `;
 
 /** GET /v1/projects/:id/gateway/sessions (listProjectGatewaySessionSpend,
- *  session-costs.ts): per-session rollup of the same scan. The account
- *  predicate is production's — account_id must be carried too, or this query
- *  can never go index-only. */
+ *  session-costs.ts): per-session rollup of the same scan, with production's
+ *  CostScope predicate (the OR arm reads session_id through the project's
+ *  sessions) — account_id and session_id must be carried, or this query can
+ *  never go index-only. */
 const SESSIONS = `
   select session_id,
          count(*)::int,
@@ -134,29 +142,51 @@ const SESSIONS = `
          count(distinct requested_model)::int,
          max(created_at)
     from kortix.gateway_request_logs
-   where account_id = $2 and project_id = $1
+   where project_id = $1
+     and (account_id = $2 or session_id in (
+            select s.session_id from kortix.project_sessions s where s.project_id = $1))
      and session_id is not null
      and created_at >= now() - make_interval(days => 30)
    group by 1
 `;
 
-const databaseUrl = process.env.TEST_DATABASE_URL;
-const suite = databaseUrl ? describe : describe.skip;
-
-const INDEX = 'idx_gateway_logs_project_time_covering';
-
-/** The projectAgg statement of GET /:projectId/gateway/budgets (gateway-spend.ts),
- *  with the same money expression llm-spend.ts composes. */
-const BUDGETS_PROJECT_AGG = `
-  select count(*)::int,
+/** GET /v1/projects/:id/gateway/sources (listProjectGatewaySourceSpend,
+ *  session-costs.ts): the same scan plus the session attribution join, a
+ *  distinct-session count and the CostScope OR arm — the columns that kept it
+ *  heap-bound before v3. The llm-value fields read the promoted column
+ *  (post-KRTX-4023 production), rendered with the log table's `l` alias. */
+const SOURCES_LLM_FIELDS = `
+         sum(${llmValueCase('l.')})::float8 as estimated_usage_value,
+         count(${llmValueCase('l.')})::int as priced_requests,
+         count(*) filter (where l.ok and ${llmValueCase('l.')} is null)::int as unpriced_requests`;
+const SOURCES = `
+  select coalesce(
+           case when ps.initiator_type::text = 'trigger' then ps.initiator_id end,
+           case when parent.initiator_type::text = 'trigger' then parent.initiator_id end,
+           ps.initiator_type::text,
+           case when l.session_id is null then 'unattributed' end,
+           'unknown'
+         ) as source,
+         count(distinct l.session_id)::int,
+         count(*)::int,
+         count(*) filter (where not l.ok)::int,
          coalesce(sum(
-           final_cost_precise + case when coalesce(
-             billing_mode,
-             case when final_cost_precise > 0 then 'credits' else 'none' end
-           ) = 'credits' then 0 else upstream_cost_precise end
-         ), 0)::float8
-    from kortix.gateway_request_logs
-   where project_id = $1 and created_at >= date_trunc('month', now())
+           l.final_cost_precise + case when coalesce(
+             l.billing_mode,
+             case when l.final_cost_precise > 0 then 'credits' else 'none' end
+           ) = 'credits' then 0 else l.upstream_cost_precise end
+         ), 0)::float8,
+         ${SOURCES_LLM_FIELDS}
+    from kortix.gateway_request_logs l
+    left join kortix.project_sessions ps
+           on ps.session_id = l.session_id and ps.project_id = l.project_id
+    left join kortix.project_sessions parent
+           on parent.session_id = ps.parent_session_id
+   where l.project_id = $1
+     and (l.account_id = $2 or l.session_id in (
+            select s.session_id from kortix.project_sessions s where s.project_id = $1))
+     and l.created_at >= now() - make_interval(hours => 24)
+   group by 1
 `;
 
 /** The gateway series shape: same scan, llm-value fields, tokens + errors +
@@ -179,6 +209,37 @@ const SERIES = `
    group by 1
 `;
 
+const databaseUrl = process.env.TEST_DATABASE_URL;
+const suite = databaseUrl ? describe : describe.skip;
+
+const INDEX = 'idx_gateway_logs_project_time_covering_v4';
+
+/** The v4 definition the migration builds (20261108090000300), verbatim — the
+ *  rebuild steps below recreate the index from it, so the suite always asserts
+ *  against the migration's own SQL. */
+const V4_DEFINITION = `
+      create index if not exists ${INDEX}
+        on kortix.gateway_request_logs (project_id, created_at) include (
+          account_id, session_id, ok, provider, requested_model, resolved_model,
+          served_model, usage_estimated, billing_mode, final_cost_precise,
+          upstream_cost_precise, input_tokens, output_tokens, cached_tokens,
+          cache_write_tokens, latency_ms, actor_user_id
+        )`;
+
+/** The projectAgg statement of GET /:projectId/gateway/budgets (gateway-spend.ts),
+ *  with the same money expression llm-spend.ts composes. */
+const BUDGETS_PROJECT_AGG = `
+  select count(*)::int,
+         coalesce(sum(
+           final_cost_precise + case when coalesce(
+             billing_mode,
+             case when final_cost_precise > 0 then 'credits' else 'none' end
+           ) = 'credits' then 0 else upstream_cost_precise end
+         ), 0)::float8
+    from kortix.gateway_request_logs
+   where project_id = $1 and created_at >= date_trunc('month', now())
+`;
+
 suite('gateway_request_logs project aggregates are index-only', () => {
   let client: pg.Client;
   let superuser: pg.Client;
@@ -190,7 +251,7 @@ suite('gateway_request_logs project aggregates are index-only', () => {
 
   const planOf = async (sql: string, params: unknown[] = [projectId]): Promise<string> => {
     const { rows } = await client.query<{ plan: unknown[] }>(`explain (costs off) ${sql}`, params);
-    return rows.map((r) => String(r["QUERY PLAN"])).join("\n");
+    return rows.map((r) => String(r['QUERY PLAN'])).join('\n');
   };
 
   beforeAll(async () => {
@@ -198,16 +259,23 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     superuser = new pg.Client({ connectionString: process.env.TEST_DATABASE_SUPERUSER_URL });
     await client.connect();
     await superuser.connect();
-    await client.query('insert into kortix.accounts (account_id, name) values ($1, $2) on conflict do nothing', [accountId, accountId]);
+    await client.query(
+      'insert into kortix.accounts (account_id, name) values ($1, $2) on conflict do nothing',
+      [accountId, accountId],
+    );
     await client.query(
       `insert into kortix.projects (project_id, account_id, name, repo_url) values ($1, $2, 'covering-index-test', 'https://example.test/covering.git')
        on conflict (project_id) do nothing`,
       [projectId, accountId],
     );
-    // 4k month-to-date rows with a request payload, so the heap is wider than
-    // the index. Size is not what the plans below rest on (`enable_seqscan =
-    // off` is): 40k rows of 2 KB timed the setup out at 30 s on a loaded CI
-    // runner.
+    // 4k month-to-date rows with a ~1.3 KB incompressible request payload and
+    // a wide metadata jsonb, so the heap is wider than the index (v4 carries
+    // no metadata — that width is what the promotion buys off the index). The
+    // seed's metadata carries the promoted keys exactly as the writer emits
+    // them, so the fill trigger (20261108090000200) populates the columns the
+    // way prod rows look. Size is not what the plans below rest on
+    // (`enable_seqscan = off` is): 40k rows of 2 KB timed the setup out at
+    // 30 s on a loaded CI runner.
     await client.query(
       `insert into kortix.gateway_request_logs
          (account_id, project_id, request_id, session_id, provider, resolved_model, requested_model,
@@ -222,7 +290,11 @@ suite('gateway_request_logs project aggregates are index-only', () => {
               i % 17 > 0, (i % 900)::int, (i % 500)::int, (i % 900)::int,
               (i % 300)::int, (i % 100)::int,
               ((i % 50) * 0.001)::numeric, ((i % 80) * 0.001)::numeric,
-              jsonb_build_object('servedModel', 'gpt-5', 'usageEstimated', case when i % 5 = 0 then 'true' else 'false' end),
+              jsonb_build_object(
+                'servedModel', 'gpt-5',
+                'usageEstimated', case when i % 5 = 0 then 'true' else 'false' end,
+                'messages', (select string_agg(md5(i::text || g::text), '') from generate_series(1, 40) g)
+              ),
               jsonb_build_object('messages', repeat('x', 200)),
               date_trunc('month', now()) + ((i % 400) || ' minutes')::interval
          from generate_series(1, 4000) as i`,
@@ -267,9 +339,9 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     await client
       .query('delete from kortix.gateway_request_logs where project_id = $1', [projectId])
       .catch(() => undefined);
-    await client.query('delete from kortix.projects where project_id = $1', [projectId]).catch(
-      () => undefined,
-    );
+    await client
+      .query('delete from kortix.projects where project_id = $1', [projectId])
+      .catch(() => undefined);
     await client
       .query('delete from kortix.accounts where account_id = $1', [accountId])
       .catch(() => undefined);
@@ -286,10 +358,13 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     await superuser.end();
   });
 
-  test('the budgets project aggregate plans as an index-only scan of the covering index', async () => {
+  test('the budgets project aggregate plans as an index-only scan (no heap fetch)', async () => {
     const plan = await planOf(BUDGETS_PROJECT_AGG);
+    // The account covering index also serves this aggregate's columns, so
+    // WHICH covering index wins is a planner cost race (see the file
+    // docstring); a heap fetch is the regression this asserts against.
     expect(plan).toContain('Index Only Scan');
-    expect(plan).toContain(INDEX);
+    expect(plan).not.toContain('Heap Scan');
   });
 
   test('the gateway series plans as an index-only scan too (needs latency_ms carried)', async () => {
@@ -304,41 +379,41 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     expect(plan).toContain(INDEX);
   });
 
-  test('the gateway breakdown plans as an index-only scan (needs the served-model column carried — KRTX-4023)', async () => {
+  test('the gateway breakdown plans as an index-only scan (needs the served-model and requested-model columns carried — KRTX-4023)', async () => {
     const plan = await planOf(BREAKDOWN);
     expect(plan).toContain('Index Only Scan');
     expect(plan).toContain(INDEX);
   });
 
-  test('the gateway sessions rollup plans as an index-only scan (KRTX-4023)', async () => {
-    const plan = await planOf(SESSIONS, [projectId, accountId]);
+  test('the gateway sources aggregate plans index-only over the join too (KRTX-4449: session_id + account_id carried)', async () => {
+    const plan = await planOf(SOURCES, [projectId, accountId]);
     expect(plan).toContain('Index Only Scan');
     expect(plan).toContain(INDEX);
   });
 
   test('the index carries exactly the columns the aggregates read', async () => {
-    const { rows } = await superuser.query<{ indexdef: string }>(
-      `select pg_get_indexdef(c.oid) as indexdef
-         from pg_class c
+    const { rows } = await superuser.query<{ indexdef: string; indisvalid: boolean }>(
+      `select pg_get_indexdef(c.oid) as indexdef, i.indisvalid
+         from pg_class c join pg_index i on i.indexrelid = c.oid
         where c.relname = $1 and c.relkind = 'i'`,
       [INDEX],
     );
     expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ indisvalid: true });
     const def = rows[0].indexdef;
-    // The exact rendering pg_get_indexdef produces for the migration's
-    // definition (20261104060001000, under its restored canonical name).
-    expect(def).toContain(
-      "USING btree (project_id, created_at) INCLUDE (account_id, session_id, ok, provider, requested_model, resolved_model, served_model, usage_estimated, billing_mode, final_cost_precise, upstream_cost_precise, input_tokens, output_tokens, cached_tokens, cache_write_tokens, latency_ms, actor_user_id)",
-    );
+    expect(def).toContain('ON kortix.gateway_request_logs USING btree (project_id, created_at)');
     for (const column of [
+      // KRTX-4449: read by the sources aggregate's attribution join, its
+      // distinct-session count and its CostScope predicate.
+      'session_id',
       'account_id',
       'ok',
       'provider',
+      // The breakdown's group key and its fallback arm.
       'requested_model',
       'resolved_model',
       'served_model',
       'usage_estimated',
-      'session_id',
       'billing_mode',
       'final_cost_precise',
       'upstream_cost_precise',
@@ -346,16 +421,21 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       'output_tokens',
       'cached_tokens',
       'cache_write_tokens',
+      // The series shape's latency percentiles.
       'latency_ms',
       'actor_user_id',
     ]) {
       expect(def).toContain(column);
     }
+    // The promotion's whole point: the wide metadata jsonb (bounded to 2000
+    // bytes per row by the writer) is OUT of the index — the promoted columns
+    // replace the only two keys the aggregates ever read from it.
+    expect(def).not.toContain('metadata');
   });
 
   test('the sessions rollup also plans index-only over its own session covering index (KRTX-4023)', async () => {
     // Production serves the sessions rollup from
-    // idx_gateway_logs_project_session_time (20261104060002000, partial on
+    // idx_gateway_logs_project_session_time (20261108090000400, partial on
     // session_id). The suite dropped it as a sibling; rebuild it from the
     // migration's own statement (plain -- a 4k-row test table), drop the
     // project covering index so it cannot win the cost race, and assert the
@@ -375,24 +455,20 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     const plan = await planOf(SESSIONS, [projectId, accountId]);
     expect(plan).toContain('Index Only Scan');
     expect(plan).toContain('idx_gateway_logs_project_session_time');
-    await superuser.query(`
-      create index if not exists ${INDEX}
-        on kortix.gateway_request_logs (project_id, created_at) include (
-          account_id, session_id, ok, provider, requested_model, resolved_model,
-          served_model, usage_estimated, billing_mode, final_cost_precise,
-          upstream_cost_precise, input_tokens, output_tokens, cached_tokens,
-          cache_write_tokens, latency_ms, actor_user_id
-        )`);
+    await superuser.query(V4_DEFINITION);
     await superuser.query('drop index if exists kortix.idx_gateway_logs_project_session_time');
   });
 
   test('dropping the index flips the plan back to the heap path (the test is not vacuous)', async () => {
     await superuser.query(`drop index if exists kortix.${INDEX}`);
-    for (const sql of [BUDGETS_PROJECT_AGG, OVERVIEW, BREAKDOWN]) {
-      const plan = await planOf(sql);
+    for (const shape of [BUDGETS_PROJECT_AGG, SERIES, OVERVIEW, BREAKDOWN]) {
+      const plan = await planOf(shape);
       expect(plan).not.toContain(INDEX);
       expect(plan).not.toContain('Index Only Scan');
     }
+    const sourcesPlan = await planOf(SOURCES, [projectId, accountId]);
+    expect(sourcesPlan).not.toContain(INDEX);
+    expect(sourcesPlan).not.toContain('Index Only Scan');
     const sessionsPlan = await planOf(SESSIONS, [projectId, accountId]);
     expect(sessionsPlan).not.toContain(INDEX);
     expect(sessionsPlan).not.toContain('Index Only Scan');
@@ -401,19 +477,15 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     // SQL is what creates the index the other tests assert on.
     await superuser.query(`set lock_timeout = '30s'`);
     await superuser.query(`set statement_timeout = '5min'`);
-    await superuser.query(`
-      create index if not exists ${INDEX}
-        on kortix.gateway_request_logs (project_id, created_at) include (
-          account_id, session_id, ok, provider, requested_model, resolved_model,
-          served_model, usage_estimated, billing_mode, final_cost_precise,
-          upstream_cost_precise, input_tokens, output_tokens, cached_tokens,
-          cache_write_tokens, latency_ms, actor_user_id
-        )`);
-    for (const sql of [BUDGETS_PROJECT_AGG, SERIES, OVERVIEW, BREAKDOWN]) {
-      const plan = await planOf(sql);
+    await superuser.query(V4_DEFINITION);
+    for (const shape of [BUDGETS_PROJECT_AGG, SERIES, OVERVIEW, BREAKDOWN]) {
+      const plan = await planOf(shape);
       expect(plan).toContain('Index Only Scan');
       expect(plan).toContain(INDEX);
     }
+    const rebuiltSourcesPlan = await planOf(SOURCES, [projectId, accountId]);
+    expect(rebuiltSourcesPlan).toContain('Index Only Scan');
+    expect(rebuiltSourcesPlan).toContain(INDEX);
     const rebuiltSessionsPlan = await planOf(SESSIONS, [projectId, accountId]);
     expect(rebuiltSessionsPlan).toContain('Index Only Scan');
     expect(rebuiltSessionsPlan).toContain(INDEX);
@@ -424,41 +496,53 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     // emits JSON booleans, the seed above wrote the strings 'true'/'false',
     // and a JSON null must stay NULL (the readers treat it as a missing key).
     // Two openai gpt-6.1-sol rows make the llm-value equivalence below
-    // actually price something.
-    await client.query(
-      'insert into kortix.accounts (account_id, name) values ($1, $2)',
-      [edgeAccountId, edgeAccountId],
+    // actually price something. The fill trigger is disabled for the seed so
+    // these rows reach the backfill as HISTORY rows — the pre-promotion state
+    // the backfill exists to heal (with the trigger live, inserts fill
+    // themselves and the backfill would find nothing to prove).
+    await superuser.query(
+      'alter table kortix.gateway_request_logs disable trigger fill_promoted_columns',
     );
-    await client.query(
-      `insert into kortix.projects (project_id, account_id, name, repo_url)
-       values ($1, $2, 'backfill-edge', 'https://example.test/backfill.git')`,
-      [edgeProjectId, edgeAccountId],
-    );
-    await client.query(
-      `insert into kortix.gateway_request_logs
-         (account_id, project_id, request_id, provider, resolved_model, requested_model,
-          status, ok, latency_ms, input_tokens, output_tokens, cached_tokens,
-          cache_write_tokens, final_cost_precise, upstream_cost_precise, metadata, created_at)
-       values
-         ($1, $2, 'bf-bool-true', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
-          jsonb_build_object('servedModel', 'served-a', 'usageEstimated', true), now()),
-         ($1, $2, 'bf-bool-false', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
-          jsonb_build_object('servedModel', 'served-a', 'usageEstimated', false), now()),
-         ($1, $2, 'bf-absent', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
-          jsonb_build_object(), now()),
-         ($1, $2, 'bf-null-keys', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
-          jsonb_build_object('servedModel', null, 'usageEstimated', null), now()),
-         ($1, $2, 'bf-string', 'kortix', 'served-b', 'req-b', 200, true, 10, 0, 0, 0, 0, 0, 0,
-          jsonb_build_object('servedModel', 'served-b', 'usageEstimated', 'true'), now()),
-         ($1, $2, 'bf-sol-estimated', 'openai', 'gpt-6.1-sol', 'codex/gpt-6.1-sol', 200, true, 10, 1000, 500, 100, 0, 0.001, 0,
-          jsonb_build_object('servedModel', 'codex/gpt-6.1-sol', 'usageEstimated', true), now()),
-         ($1, $2, 'bf-sol-reported', 'openai', 'gpt-6.1-sol', 'codex/gpt-6.1-sol', 200, true, 10, 2000, 500, 100, 0, 0.002, 0,
-          jsonb_build_object('servedModel', 'codex/gpt-6.1-sol'), now())
-    `,
-      [edgeAccountId, edgeProjectId],
-    );
+    try {
+      await client.query(
+        'insert into kortix.accounts (account_id, name) values ($1, $2)',
+        [edgeAccountId, edgeAccountId],
+      );
+      await client.query(
+        `insert into kortix.projects (project_id, account_id, name, repo_url)
+         values ($1, $2, 'backfill-edge', 'https://example.test/backfill.git')`,
+        [edgeProjectId, edgeAccountId],
+      );
+      await client.query(
+        `insert into kortix.gateway_request_logs
+           (account_id, project_id, request_id, provider, resolved_model, requested_model,
+            status, ok, latency_ms, input_tokens, output_tokens, cached_tokens,
+            cache_write_tokens, final_cost_precise, upstream_cost_precise, metadata, created_at)
+         values
+           ($1, $2, 'bf-bool-true', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
+            jsonb_build_object('servedModel', 'served-a', 'usageEstimated', true), now()),
+           ($1, $2, 'bf-bool-false', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
+            jsonb_build_object('servedModel', 'served-a', 'usageEstimated', false), now()),
+           ($1, $2, 'bf-absent', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
+            jsonb_build_object(), now()),
+           ($1, $2, 'bf-null-keys', 'kortix', 'served-a', 'req-a', 200, true, 10, 0, 0, 0, 0, 0, 0,
+            jsonb_build_object('servedModel', null, 'usageEstimated', null), now()),
+           ($1, $2, 'bf-string', 'kortix', 'served-b', 'req-b', 200, true, 10, 0, 0, 0, 0, 0, 0,
+            jsonb_build_object('servedModel', 'served-b', 'usageEstimated', 'true'), now()),
+           ($1, $2, 'bf-sol-estimated', 'openai', 'gpt-6.1-sol', 'codex/gpt-6.1-sol', 200, true, 10, 1000, 500, 100, 0, 0.001, 0,
+            jsonb_build_object('servedModel', 'codex/gpt-6.1-sol', 'usageEstimated', true), now()),
+           ($1, $2, 'bf-sol-reported', 'openai', 'gpt-6.1-sol', 'codex/gpt-6.1-sol', 200, true, 10, 2000, 500, 100, 0, 0.002, 0,
+            jsonb_build_object('servedModel', 'codex/gpt-6.1-sol'), now())
+      `,
+        [edgeAccountId, edgeProjectId],
+      );
+    } finally {
+      await superuser.query(
+        'alter table kortix.gateway_request_logs enable trigger fill_promoted_columns',
+      );
+    }
 
-    // The migration's own statement (20261104060000000), run in the same
+    // The migration's own statement (20261108090000100), run in the same
     // idempotent batch loop: every pass shrinks its own selection, so it ends
     // when a batch changes nothing.
     for (;;) {

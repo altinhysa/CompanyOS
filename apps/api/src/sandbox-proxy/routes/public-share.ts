@@ -308,11 +308,4 @@ publicShareApp.all('/:token/:port/*', async (c) => {
   });
 });
 
-publicShareApp.all('/:token/:port', async (c) => {
-  const token = c.req.param('token');
-  const port = c.req.param('port');
-  const url = new URL(c.req.url);
-  return c.redirect(`/v1/p/public-share/${token}/${port}/${url.search}`, 301);
-});
-
 export { publicShareApp };

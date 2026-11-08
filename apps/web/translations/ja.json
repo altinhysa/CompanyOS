@@ -347,7 +347,8 @@
       "actionImport": "既存のリポジトリをインポート",
       "ownerTypePersonal": "個人アカウント",
       "ownerTypeOrg": "組織",
-      "createPersonalAuthorize": "個人アカウントにリポジトリを初めて作成するとき、Kortix は GitHub で認可を求めます。"
+      "createPersonalAuthorize": "個人アカウントにリポジトリを初めて作成するとき、Kortix は GitHub で認可を求めます。",
+      "importHint": "Kortix はこのリポジトリの kortix.yaml からエージェントを読み込みます。ファイルがない場合、ワークスペースはコーディングエージェントにコピーするセットアッププロンプトを表示します。"
     }
   },
   "projectHome": {
@@ -3749,6 +3750,25 @@
     "startHint": "下で取り組んでいることをKortixに伝えるか、「Kortixの使い方を案内して」と送るとガイド付きでセットアップできます。",
     "placeholder": "取り組んでいることを Kortix に伝えてください",
     "kickoff": "Kortixの使い方を案内して"
+  },
+  "noAgentHome": {
+    "setup": {
+      "title": "このリポジトリで Kortix をセットアップ",
+      "body": "クローンで Claude Code、Codex、Cursor のいずれかにセットアッププロンプトを貼り付けてください。<code>kortix.yaml</code> が <code>{branch}</code> に追加されると、ここでチャットが開きます。"
+    },
+    "defaultBranch": "デフォルトブランチ",
+    "copy": "セットアッププロンプトをコピー",
+    "copied": "コピーしました",
+    "copyFailed": "プロンプトをコピーできませんでした",
+    "docs": "セットアップガイド",
+    "noAccess": {
+      "title": "利用できるエージェントがありません",
+      "body": "このワークスペースを管理する人なら誰でもアクセス権を付与できます。"
+    },
+    "empty": {
+      "title": "このワークスペースにエージェントがありません",
+      "body": "kortix.yaml で宣言するか、「新しいエージェント」で作成してください。"
+    }
   },
   "announcements": {
     "memories": {

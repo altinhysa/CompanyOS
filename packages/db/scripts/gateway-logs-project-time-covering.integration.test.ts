@@ -690,9 +690,11 @@ suite('gateway_request_logs project aggregates are index-only', () => {
          from kortix.gateway_request_logs where request_id = 'bf-oversized'`,
     );
     expect(bounded).toHaveLength(1);
-    expect(Buffer.byteLength(bounded[0]!.requested_model, 'utf8')).toBe(255);
-    expect(Buffer.byteLength(bounded[0]!.resolved_model, 'utf8')).toBe(252);
-    expect(Buffer.byteLength(bounded[0]!.served_model ?? '', 'utf8')).toBe(252);
+    const oversized = bounded[0];
+    expect(oversized).toBeTruthy();
+    expect(Buffer.byteLength(oversized?.requested_model ?? '', 'utf8')).toBe(255);
+    expect(Buffer.byteLength(oversized?.resolved_model ?? '', 'utf8')).toBe(252);
+    expect(Buffer.byteLength(oversized?.served_model ?? '', 'utf8')).toBe(252);
     // G9 round 2: the helper's cut is the maximal byte-safe prefix — the
     // same prefix the writer's clipText produces for the same input (an
     // average-width cut would keep 97 of these 255 ASCII bytes).
@@ -816,7 +818,9 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       );
       expect(rows[0]?.clipped).toBe(c.expected);
       if (rows[0]?.clipped) {
-        expect(Buffer.byteLength(rows[0]!.clipped, 'utf8')).toBe(Buffer.byteLength(c.expected!, 'utf8'));
+        expect(Buffer.byteLength(rows[0].clipped, 'utf8')).toBe(
+          Buffer.byteLength(c.expected ?? '', 'utf8'),
+        );
       }
     }
   });
@@ -839,7 +843,7 @@ suite('gateway_request_logs project aggregates are index-only', () => {
          from kortix.gateway_request_logs where request_id = 'cx-mixed-width'`,
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.served_model).toBe('A'.repeat(255));
-    expect(rows[0]!.bytes).toBe(255);
+    expect(rows[0]?.served_model).toBe('A'.repeat(255));
+    expect(rows[0]?.bytes).toBe(255);
   });
 });

@@ -96,7 +96,7 @@ describe('buildGatewayTraceRow', () => {
   test('strips NUL bytes from the servedModel metadata key when lifting it into the column', () => {
     const row = buildGatewayTraceRow(baseInput({ metadata: { servedModel: `gpt-6.1${NUL}-sol` } }));
     expect(row.servedModel).toBe('gpt-6.1-sol');
-    expect((row.metadata as any).servedModel).toBe('gpt-6.1-sol');
+    expect(row.metadata?.servedModel).toBe('gpt-6.1-sol');
   });
 
   test('a non-string servedModel value never reaches the column', () => {

@@ -19,7 +19,7 @@
  * — so the plans silently fell back to heap-fetching the wide rows (KRTX-4023:
  * whole-dashboard 25 s deadline storms). The two values are now REAL columns
  * (20261108090000000, written by the gateway writer and backfilled by
- * 20261108090000100) and the covering indexes carry them as plain INCLUDE
+ * 20261108090000200) and the covering indexes carry them as plain INCLUDE
  * columns: the project-time index is v4 (20261108090000300 — v3's scalar
  * columns, `metadata` replaced by the promoted pair, requested_model back for
  * the breakdown's fallback arm), so the plans are index-only again.
@@ -39,8 +39,8 @@ import pg from 'pg';
  * The per-row LLM retail value case, verbatim from
  * apps/api/src/shared/llm-value.ts `rowLlmValueSql` (KRTX-3560, 2026-10-27).
  * KRTX-4023: this case reads the promoted `usage_estimated` column — written
- * by the gateway writer, the 20261108090000100 backfill and the fill trigger
- * 20261108090000200; the pre-promotion read was
+ * by the gateway writer, the 20261108090000200 backfill and the fill trigger
+ * 20261108090000100; the pre-promotion read was
  * `metadata->>'usageEstimated'`, a jsonb expression no INCLUDE list can carry
  * and a btree expression key never serves index-only — plus provider,
  * resolved_model, cached_tokens and cache_write_tokens. Until those live in
@@ -272,7 +272,7 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     // a wide metadata jsonb, so the heap is wider than the index (v4 carries
     // no metadata — that width is what the promotion buys off the index). The
     // seed's metadata carries the promoted keys exactly as the writer emits
-    // them, so the fill trigger (20261108090000200) populates the columns the
+    // them, so the fill trigger (20261108090000100) populates the columns the
     // way prod rows look. Size is not what the plans below rest on
     // (`enable_seqscan = off` is): 40k rows of 2 KB timed the setup out at
     // 30 s on a loaded CI runner.
@@ -547,9 +547,9 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       );
     }
 
-    // The migration's own statement (20261108090000100), run in the same
-    // idempotent batch loop: every pass shrinks its own selection, so it ends
-    // when a batch changes nothing.
+    // The backfill's promoted-columns pass (20261108090000200), verbatim in
+    // the same idempotent batch loop: every pass shrinks its own selection,
+    // so it ends when a batch changes nothing.
     for (;;) {
       const { rowCount } = await client.query(`
         update kortix.gateway_request_logs
@@ -782,5 +782,64 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       // backfill.
       'il-during': ['served-y', true],
     });
+  });
+
+  // Review item 2026-11-08 (mixed widths): the helper's average-width seed
+  // cut kept 97 bytes of a 255-ASCII-byte value — an historical/old-writer
+  // identity truncated harder than the writer's clipText leaves the same
+  // input. Each case pins the maximal byte-safe prefix: the widest
+  // whole-code-point prefix within the byte budget (literal expectations,
+  // not a reimplementation of the writer's greedy fill).
+  test('clip_text_bytes keeps the maximal byte-safe code-point prefix (mixed widths)', async () => {
+    const cases: Array<{ value: string | null; maxBytes: number; expected: string | null }> = [
+      // The reproduced defect's input: 255 ASCII bytes then 300 rockets (the
+      // whole string's 2.62 bytes/char average misled the old estimate to
+      // 97 bytes). The writer keeps all 255 ASCII bytes.
+      { value: `${'A'.repeat(255)}${'🚀'.repeat(300)}`, maxBytes: 255, expected: 'A'.repeat(255) },
+      // Wide characters only: 63 rockets = 252 bytes; the 64th (256) exceeds.
+      { value: '🚀'.repeat(300), maxBytes: 255, expected: '🚀'.repeat(63) },
+      // 3-byte code points: 85 of them = 255 bytes exactly.
+      { value: '中'.repeat(200), maxBytes: 255, expected: '中'.repeat(85) },
+      // Narrow budget over mixed widths: a+b+c+复+读 = 9 bytes; the next
+      // 复 adds 3 more and exceeds 10.
+      { value: 'abc复读中', maxBytes: 10, expected: 'abc复读' },
+      // Inside the budget the value is returned untouched.
+      { value: 'gpt-6.1-sol', maxBytes: 255, expected: 'gpt-6.1-sol' },
+      { value: '', maxBytes: 255, expected: '' },
+      { value: null, maxBytes: 255, expected: null },
+      { value: 'abc', maxBytes: 0, expected: '' },
+    ];
+    for (const c of cases) {
+      const { rows } = await client.query<{ clipped: string | null }>(
+        'select kortix.clip_text_bytes($1, $2) as clipped',
+        [c.value, c.maxBytes],
+      );
+      expect(rows[0]?.clipped).toBe(c.expected);
+      if (rows[0]?.clipped) {
+        expect(Buffer.byteLength(rows[0]!.clipped, 'utf8')).toBe(Buffer.byteLength(c.expected!, 'utf8'));
+      }
+    }
+  });
+
+  // The same mixed-width key through the live fill trigger: the old writer's
+  // shape (key in metadata only) must lift to exactly the string the writer
+  // clipText produces for the same input — not an average-width estimate of
+  // it.
+  test('the fill trigger lifts a mixed-width served key exactly as wide as the writer clips it', async () => {
+    await client.query(
+      `insert into kortix.gateway_request_logs
+         (account_id, project_id, request_id, requested_model, resolved_model, provider,
+          status, ok, billing_mode, final_cost_precise, upstream_cost_precise, metadata, created_at)
+       values ($1, $2, 'cx-mixed-width', 'req-mw', 'mw', 'kortix', 200, true, 'none', 0, 0,
+               jsonb_build_object('servedModel', $3::text), now())`,
+      [edgeAccountId, edgeProjectId, `${'A'.repeat(255)}${'🚀'.repeat(300)}`],
+    );
+    const { rows } = await client.query<{ served_model: string; bytes: number }>(
+      `select served_model, octet_length(served_model) as bytes
+         from kortix.gateway_request_logs where request_id = 'cx-mixed-width'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.served_model).toBe('A'.repeat(255));
+    expect(rows[0]!.bytes).toBe(255);
   });
 });

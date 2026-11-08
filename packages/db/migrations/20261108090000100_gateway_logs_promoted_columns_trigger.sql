@@ -55,7 +55,7 @@ BEGIN
   -- carries the model strings as btree tuple members; old writers predate
   -- boundMetadata and bounded nothing, so the trigger bounds all three
   -- model strings for every writer version — the shared helper from
-  -- 20261108090000200 walks whole code points against the byte budget).
+  -- 20261108090000000 walks whole code points against the byte budget).
   IF NEW.served_model IS NULL AND NEW.metadata ? 'servedModel' THEN
     NEW.served_model := kortix.clip_text_bytes(NEW.metadata ->> 'servedModel', 255);
   END IF;

@@ -123,6 +123,8 @@ describe('AccountTopBar identity avatar', () => {
     expect(newPage).toContain('user?.user_metadata?.avatar_url');
     const selector = await read('../../features/workspace/project-selector/project-selector.tsx');
     expect(selector).toContain('user?.user_metadata?.avatar_url');
+    const inboxPage = await read('../../app/[locale]/(app)/inbox/page.tsx');
+    expect(inboxPage).toContain('user?.user_metadata?.avatar_url');
   });
 
   const render = (props?: Partial<React.ComponentProps<typeof AccountTopBar>>) =>

@@ -267,6 +267,10 @@ publicShareApp.all('/:token/file/*', async (c) => {
   });
 });
 
+// One edge, both forms: Hono's non-strict match serves `/…/<token>/<port>` and
+// `/…/<token>/<port>/` here. Port roots once had a `/:token/:port` redirect of
+// their own in front of it; the wildcard answered first, so it never ran
+// (KRTX-4518).
 publicShareApp.all('/:token/:port/*', async (c) => {
   const token = c.req.param('token');
   const port = Number(c.req.param('port'));

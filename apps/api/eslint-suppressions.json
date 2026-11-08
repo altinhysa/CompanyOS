@@ -1004,16 +1004,13 @@
   },
   "src/git-proxy/index.ts": {
     "kortix-api/projects-surface": {
-      "count": 7
+      "count": 5
     },
     "kortix-api/replica-local": {
-      "count": 2
+      "count": 1
     },
     "no-console": {
-      "count": 10
-    },
-    "no-restricted-properties": {
-      "count": 2
+      "count": 7
     },
     "no-restricted-syntax": {
       "count": 6
@@ -1534,11 +1531,6 @@
       "count": 1
     }
   },
-  "src/projects/git/fast-boot-bundle.ts": {
-    "no-console": {
-      "count": 1
-    }
-  },
   "src/projects/git/files.ts": {
     "no-restricted-properties": {
       "count": 1
@@ -1597,11 +1589,6 @@
   "src/projects/lib/connector-approval-decision.ts": {
     "no-console": {
       "count": 2
-    }
-  },
-  "src/projects/lib/fast-boot-git-hint.ts": {
-    "no-console": {
-      "count": 1
     }
   },
   "src/projects/lib/git.ts": {
@@ -1794,7 +1781,7 @@
   },
   "src/projects/provision-core.ts": {
     "no-console": {
-      "count": 6
+      "count": 5
     }
   },
   "src/projects/reaper-constants.ts": {

@@ -15,7 +15,6 @@ import { allocateSessionRuntime } from '../lib/session-runtime-allocator';
 import {
   projectImageAllowedForSession,
   sandboxSlugFromSessionMetadata,
-  repositoryAccessFromSessionMetadata,
 } from '../lib/session-sandbox-metadata';
 import {
   buildSessionSandboxEnvVars,
@@ -310,10 +309,7 @@ async function provisionReplacementRuntime(
     providerName,
     baseRef: session.baseRef ?? loaded.row.defaultBranch,
     agentName: session.agentName ?? 'default',
-    allowProjectImage: projectImageAllowedForSession(
-      session.agentName,
-      repositoryAccessFromSessionMetadata(session.metadata),
-    ),
+    allowProjectImage: projectImageAllowedForSession(session.agentName),
     sandboxSlug: sandboxSlugFromSessionMetadata(session.metadata),
     runtimeMetadata,
     initialTurn,
@@ -330,12 +326,8 @@ async function provisionReplacementRuntime(
         sessionModel,
         defaultBranch: loaded.row.defaultBranch,
         manifestPath: loaded.row.manifestPath,
-        // A restarted My Kortix session must keep its runtime: without this
-        // the rebuilt env loses KORTIX_PROJECT_AUTO_CLONE=0 and My Kortix's
-        // config, so the daemon clones the project into its empty workspace.
+        // A restarted My Kortix session must keep its runtime and config.
         platformMetaAgent: isMyKortixAgentName(session.agentName ?? ''),
-        repositoryAccess: repositoryAccessFromSessionMetadata(session.metadata),
-        restoreSessionBranch: true,
       }),
     resolveGitProject: async () => withProjectGitAuth(loaded.row as any),
   });

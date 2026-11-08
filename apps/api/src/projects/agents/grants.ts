@@ -234,23 +234,6 @@ export function sandboxFromLoadedAgents(agentName: string, loaded: LoadedAgents)
   return loaded.specs.find((spec) => spec.name === concreteName && spec.enabled)?.sandbox ?? null;
 }
 
-/** Resolve the selected agent's project file delivery mode without repository I/O.
- *  An agent block that fails to parse, or is off, gets no repository: a typo in
- *  `workspace` must not grant the checkout it tried to withhold. */
-export function repositoryAccessFromLoadedAgents(agentName: string, loaded: LoadedAgents): boolean {
-  const name = agentName === DEFAULT_AGENT_SENTINEL && loaded.defaultAgent ? loaded.defaultAgent : agentName;
-  if (loaded.errors.some((error) => error.name === name)) return false;
-  const spec = loaded.specs.find((candidate) => candidate.name === name);
-  if (spec && !spec.enabled) return false;
-  return spec?.repositoryAccess ?? true;
-}
-
-/** Legacy read remains unavailable until its owner explicitly chooses a boolean policy. */
-export function legacyReadWorkspaceFromLoadedAgents(agentName: string, loaded: LoadedAgents): boolean {
-  const name = agentName === DEFAULT_AGENT_SENTINEL && loaded.defaultAgent ? loaded.defaultAgent : agentName;
-  return loaded.specs.find((spec) => spec.name === name && spec.enabled)?.legacyReadWorkspace ?? false;
-}
-
 /**
  * Is this project subject to MANDATORY DECLARED AGENTS enforcement?
  *

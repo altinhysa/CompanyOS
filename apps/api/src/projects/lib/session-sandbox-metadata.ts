@@ -20,12 +20,9 @@ export function repositoryAccessFromSessionMetadata(metadata: unknown): boolean 
   return !Object.prototype.hasOwnProperty.call(record, 'workspace_mode') || record.workspace_mode === 'branch';
 }
 
-/** Project images contain repository bytes and require repository access. */
-export function projectImageAllowedForSession(
-  agentName: string | null | undefined,
-  repositoryAccess: boolean = true,
-): boolean {
-  return !isMyKortixAgentName(agentName ?? '') && repositoryAccess;
+/** My Kortix always boots the platform image; every other session may boot the project's template. */
+export function projectImageAllowedForSession(agentName: string | null | undefined): boolean {
+  return !isMyKortixAgentName(agentName ?? '');
 }
 
 /** Apply the session sandbox precedence contract. */

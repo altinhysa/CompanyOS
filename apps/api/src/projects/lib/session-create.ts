@@ -49,8 +49,6 @@ import {
   projectRequiresDeclaredAgents,
   resolveGovernedAgentGrant,
   sandboxFromLoadedAgents,
-  repositoryAccessFromLoadedAgents,
-  legacyReadWorkspaceFromLoadedAgents,
 } from '../agents';
 import { convertPendingPromptToInboxRow } from '../session-lifecycle/pending-prompt';
 
@@ -542,7 +540,6 @@ async function resolveSessionAgent(params: {
     projectDefaultAgent: string | null;
     agentName: string;
     platformMetaAgent: boolean;
-    repositoryAccess: boolean;
   }>
 > {
   const { input, projectId } = params;
@@ -690,19 +687,7 @@ async function resolveSessionAgent(params: {
       },
     };
   }
-  const repositoryAccess = repositoryAccessFromLoadedAgents(agentName, loadedAgents);
-  if (legacyReadWorkspaceFromLoadedAgents(agentName, loadedAgents)) {
-    return {
-      error: {
-        status: 409,
-        body: {
-          error: 'workspace mode "read" requires restricted workspace artifacts',
-          code: 'WORKSPACE_MODE_UNAVAILABLE',
-        },
-      },
-    };
-  }
-  return { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent, repositoryAccess };
+  return { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent };
 }
 
 /**
@@ -1180,7 +1165,6 @@ function buildSessionCreateMetadata(params: {
   sessionModel: string | null;
   sessionModelSource: ModelSource | null;
   parentSession: ParentSession;
-  repositoryAccess: boolean;
   sandboxSlug: string;
   /** Filed into a space: the first prompt is stored for the channel timeline. */
   filed: boolean;
@@ -1203,7 +1187,6 @@ function buildSessionCreateMetadata(params: {
     sessionModel,
     sessionModelSource,
     parentSession,
-    repositoryAccess,
     sandboxSlug,
     filed,
     workspaceVolume,
@@ -1297,10 +1280,7 @@ function buildSessionCreateMetadata(params: {
     // tight grace so finished workers don't idle at full compute.
     ...(input.callerSessionId ? { spawned_by_session: input.callerSessionId } : {}),
     ...(sessionSource && sessionSource !== invocationSource ? { source: sessionSource } : {}),
-    repository_access: repositoryAccess,
     repository_generation: repositoryGeneration(project.metadata as Record<string, unknown>),
-    // Rollback compatibility: older API replicas must also enforce this restriction.
-    workspace_mode: repositoryAccess ? 'branch' : 'runtime',
     sandbox_slug: sandboxSlug,
     // The session's /workspace volume: every box of the session mounts it (platform/services/workspace-volume.ts).
     ...(workspaceVolume ? { [WORKSPACE_VOLUME_SESSION_KEY]: workspaceVolume } : {}),
@@ -1500,44 +1480,6 @@ async function mergeCreatedSessionMetadata(sessionId: string, extra: Record<stri
     .where(eq(projectSessions.sessionId, sessionId));
 }
 
-/** The project snapshot pin the new session boots with (S3 config provider). */
-async function resolveCreatedSessionProjectSnapshot(
-  params: { project: ProjectRow; projectId: string; sessionId: string; baseRef: string; tl: ProvisionTimeline },
-  fastBootGitHint: Awaited<ReturnType<typeof resolveFastBootGitHintWithCache>> | undefined,
-) {
-  const { project, projectId, sessionId, baseRef, tl } = params;
-  // S3 config provider: pin a PREPARED archive for the exact base tip
-  // and presign its download descriptor right here (local signing, no
-  // bucket call on the create path), or record the miss and queue the
-  // build for the next session. One indexed read.
-  const projectSnapshotMode = resolveProjectSnapshotMode(project.metadata);
-  const projectSnapshot =
-    projectSnapshotMode === 'git'
-      ? { pin: null, descriptor: null, cache: 'unconfigured' as const }
-      : await resolveProjectSnapshotPinForSession({
-          projectId,
-          ref: baseRef,
-          commitSha: fastBootGitHint?.baseSha,
-          repoUrl: project.repoUrl,
-        }).catch((err) => {
-          console.warn('[project-snapshot] pin lookup failed; session boots from git', {
-            projectId,
-            sessionId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return { pin: null, descriptor: null, cache: 'miss' as const };
-        });
-  if (projectSnapshotMode !== 'git') {
-    tl.mark(`project-snapshot-${projectSnapshot.cache}`);
-  }
-  return {
-    fastBootGitHint,
-    projectSnapshotMode,
-    projectSnapshotPin: projectSnapshot.pin,
-    projectSnapshotDescriptor: projectSnapshot.descriptor,
-  };
-}
-
 /** Build the env and kick off provisionSessionSandbox() for a new session row. */
 async function provisionCreatedSession(params: {
   input: CreateProjectSessionInput;
@@ -1548,7 +1490,6 @@ async function provisionCreatedSession(params: {
   agentName: string;
   sessionModel: string | null;
   platformMetaAgent: boolean;
-  repositoryAccess: boolean;
   providerName: SandboxProviderName;
   providerLocked: boolean;
   initialTurn: ReturnType<typeof prepareInitialSandboxTurn> | null;
@@ -1563,7 +1504,6 @@ async function provisionCreatedSession(params: {
     agentName,
     sessionModel,
     platformMetaAgent,
-    repositoryAccess,
     providerName,
     providerLocked,
     initialTurn,
@@ -1579,61 +1519,19 @@ async function provisionCreatedSession(params: {
       tl.mark('git-auth');
       return gitProject;
     });
-    // Resolve the base tip from the API's existing mirror and package its
-    // one-commit scaffold delta. This moves the small object transfer into
-    // sandbox creation and removes the slow in-guest Git negotiation.
-    // Best-effort + timeout-guarded (never block create): on failure/timeout
-    // the hint is omitted → daemon delta-fetches as before. Runs CONCURRENTLY
-    // with gitAuth (folded into the env-build chain, not awaited inline).
-    let fastBootHintTimeout: ReturnType<typeof setTimeout> | undefined;
-    // The hint is what lets the daemon boot with ZERO proxied git requests
-    // (scaffold + delta) and start the runtime before the checkout. Bounded by the 2 s race below; a miss
-    // just means the daemon's fetch fallback.
-    const fastBootGitHintPromise = Promise.race([
-      projectWithGitAuthPromise
-        .then((projectWithGitAuth) =>
-          resolveFastBootGitHintWithCache(
-            projectWithGitAuth,
-            baseRef,
-            project.metadata,
-          ),
-        )
-        .catch(() => undefined),
-      new Promise<undefined>((resolve) => {
-        fastBootHintTimeout = setTimeout(() => resolve(undefined), 2_000);
-      }),
-    ]).finally(() => {
-      if (fastBootHintTimeout) clearTimeout(fastBootHintTimeout);
-    });
-    const envPromise = fastBootGitHintPromise
-      .then((fastBootGitHint) =>
-        resolveCreatedSessionProjectSnapshot({ project, projectId, sessionId, baseRef, tl }, fastBootGitHint),
-      )
-      .then(({ fastBootGitHint, projectSnapshotMode, projectSnapshotPin, projectSnapshotDescriptor }) =>
-        buildSessionSandboxEnvVars({
-          accountId,
-          projectId,
-          sessionId,
-          userId,
-          repoUrl: project.repoUrl,
-          baseRef,
-          agentName,
-          sessionModel,
-          platformMetaAgent,
-          freshSession: true,
-          projectSnapshotMode,
-          projectSnapshotPin,
-          projectSnapshotDescriptor,
-          baseSha: fastBootGitHint?.baseSha,
-          gitDeltaBundleBase64: fastBootGitHint?.gitDeltaBundleBase64,
-          gitDeltaBundleRemote: fastBootGitHint?.gitDeltaBundleRemote,
-          gitDeltaParentSha: fastBootGitHint?.gitDeltaParentSha,
-          gitDeltaParentCommitBase64: fastBootGitHint?.gitDeltaParentCommitBase64,
-          defaultBranch: project.defaultBranch,
-          manifestPath: project.manifestPath,
-          repositoryAccess,
-        }),
-      )
+    const envPromise = buildSessionSandboxEnvVars({
+      accountId,
+      projectId,
+      sessionId,
+      userId,
+      repoUrl: project.repoUrl,
+      baseRef,
+      agentName,
+      sessionModel,
+      platformMetaAgent,
+      defaultBranch: project.defaultBranch,
+      manifestPath: project.manifestPath,
+    })
       .then((envVars) => {
         tl.mark('env-vars');
         return envVars;
@@ -1667,7 +1565,7 @@ async function provisionCreatedSession(params: {
       projectId,
       userId,
       agentName,
-      allowProjectImage: projectImageAllowedForSession(agentName, repositoryAccess),
+      allowProjectImage: projectImageAllowedForSession(agentName),
       provider: providerName,
       providerLocked,
       metadata: {
@@ -1860,7 +1758,7 @@ export async function createProjectSession(input: {
       : [];
   const agent = await resolveSessionAgent({ input, projectId, channelAgents });
   if (agent.error) return { error: agent.error };
-  const { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent, repositoryAccess } = agent;
+  const { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent } = agent;
 
   const model = await resolveSessionModel({
     input,
@@ -1976,7 +1874,6 @@ export async function createProjectSession(input: {
     sessionModel,
     sessionModelSource,
     parentSession,
-    repositoryAccess,
     sandboxSlug,
     filed: requestedSpace.filed,
     // Only a Platinum session box mounts it. An unrecorded open is deleted.
@@ -2127,7 +2024,6 @@ export async function createProjectSession(input: {
     agentName,
     sessionModel,
     platformMetaAgent,
-    repositoryAccess,
     providerName,
     providerLocked,
     initialTurn,

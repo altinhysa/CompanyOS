@@ -49,12 +49,10 @@ describe('restricted workspace repository boundary', () => {
     expect(workspaceMetadataAllowsRepositoryAccess({})).toBe(true);
   });
 
-  test('project images require a full-repository non-meta session', () => {
-    expect(projectImageAllowedForSession('default', true)).toBe(true);
-    expect(projectImageAllowedForSession('default', undefined)).toBe(true);
-    expect(projectImageAllowedForSession('default', false)).toBe(false);
-    expect(projectImageAllowedForSession('default', false)).toBe(false);
-    expect(projectImageAllowedForSession('meta', true)).toBe(false);
+  test('every session but My Kortix may boot the project image', () => {
+    expect(projectImageAllowedForSession('default')).toBe(true);
+    expect(projectImageAllowedForSession(undefined)).toBe(true);
+    expect(projectImageAllowedForSession('meta')).toBe(false);
   });
 
   test('classifies every repository-backed project capability', () => {

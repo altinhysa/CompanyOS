@@ -4400,6 +4400,7 @@
     "useModelStore",
     "useNotificationInbox",
     "useNotificationPreferences",
+    "useNow",
     "useOpenAskCount",
     "useOpenProjectDm",
     "useOpenWorkspaceDm",

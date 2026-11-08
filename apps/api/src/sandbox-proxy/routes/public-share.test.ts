@@ -12,6 +12,7 @@ mock.module('../../shared/db', () => ({
     }),
     update: () => ({ set: () => ({ where: async () => {} }) }),
   },
+  withDbTransaction: <T,>(action: () => Promise<T>): Promise<T> => action(),
 }));
 
 const { PUBLIC_SHARE_SANDBOX_CSP, publicShareApp, previewNavigationRedirect, publicResponseHeaders } =

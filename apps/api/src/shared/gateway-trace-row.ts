@@ -34,10 +34,15 @@ function nonNegInt(value: number | undefined) {
   return Number.isFinite(value) && value && value > 0 ? Math.floor(value) : 0;
 }
 
-// metadata is an INCLUDE column of idx_gateway_logs_project_time_covering_v3,
-// so it lives in a btree tuple (max ~2.7 KB): an oversized value fails the
-// INSERT of the whole trace row. attemptFailures carries upstream error text,
-// the one unbounded part; shrink it tier by tier until the metadata fits.
+// metadata rode in a btree tuple while a covering index carried it
+// (idx_gateway_logs_project_time_covering v2/v3, KRTX-4022/KRTX-4449: max
+// ~2.7 KB — an oversized value failed the INSERT of the whole trace row).
+// v4 (20261108090000300) replaces that INCLUDE with the promoted
+// served_model/usage_estimated pair, and no index carries metadata anymore —
+// the bound STAYS as the row-width guard: the jsonb column itself is
+// unbounded, and the logs page reads it per row. attemptFailures carries
+// upstream error text, the one unbounded part; shrink it tier by tier until
+// the metadata fits.
 const METADATA_MAX_BYTES = 2000;
 const FAILURE_TIERS = [
   { keep: 8, chars: 160 },

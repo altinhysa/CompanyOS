@@ -113,8 +113,10 @@ describe('buildGatewayTraceRow', () => {
 });
 
 describe('buildGatewayTraceRow metadata bound (KRTX-4022)', () => {
-  // metadata is an INCLUDE column of idx_gateway_logs_project_time_covering_v3;
-  // a btree tuple over ~2.7 KB makes the INSERT of the whole trace row fail.
+  // metadata rode a btree tuple while a covering index carried it (v2/v3,
+  // max ~2.7 KB); v4 promoted the two read keys out and no index carries
+  // metadata anymore — the bound stays as the row-width guard (the jsonb
+  // column is unbounded and the logs page reads it per row).
   const BOUND = 2000;
   const failure = (attempt: number, message: string) => ({
     attempt,

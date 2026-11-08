@@ -21,7 +21,7 @@ export const shorthands = undefined;
 // siblings (the whole-dashboard deadline storms of KRTX-4023).
 //
 // The estimated flag is now a REAL column (20261108090000000 + backfill in
-// 20261108090000100); this replacement adds it and the three token/model
+// 20261108090000200); this replacement adds it and the three token/model
 // columns to the INCLUDE list over the same (project_id, session_id,
 // created_at) keys and the same `session_id is not null` predicate. Built
 // under a temp name; 20261108090000600 drops the old index and

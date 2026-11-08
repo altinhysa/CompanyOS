@@ -7,7 +7,7 @@ set statement_timeout = '30s';
 -- WHAT: KRTX-4023, the mixed-version writer guard for the promoted columns
 -- `served_model` / `usage_estimated` (added by
 -- 20261108090000000_gateway_logs_served_model_usage_estimated.sql, history
--- healed by the batched backfill 20261108090000100).
+-- healed by the batched backfill 20261108090000200).
 --
 -- WHY: migrations run before the new pods start, but an ECS rollout replaces
 -- pods gradually — old code keeps inserting rows until its last task drains.
@@ -55,7 +55,7 @@ BEGIN
   -- carries the model strings as btree tuple members; old writers predate
   -- boundMetadata and bounded nothing, so the trigger bounds all three
   -- model strings for every writer version — the shared helper from
-  -- 20261108090000100 walks whole code points against the byte budget).
+  -- 20261108090000200 walks whole code points against the byte budget).
   IF NEW.served_model IS NULL AND NEW.metadata ? 'servedModel' THEN
     NEW.served_model := kortix.clip_text_bytes(NEW.metadata ->> 'servedModel', 255);
   END IF;

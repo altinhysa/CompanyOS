@@ -20,7 +20,7 @@ set statement_timeout = '30s';
 -- model that answered) and `usage_estimated` (the usage-was-estimated flag).
 -- The gateway writer populates them at insert from the same metadata keys it
 -- already writes (apps/api/src/shared/gateway-trace-row.ts), the batched
--- backfill in 20261108090000100 fills history from those keys, and the
+-- backfill in 20261108090000200 fills history from those keys, and the
 -- readers switch to the columns (falling back exactly as a missing metadata
 -- key reads today). The covering indexes that must carry them are rebuilt in
 -- 20261108090000300 / 20261108090000400.
@@ -40,4 +40,34 @@ set statement_timeout = '30s';
 -- once the readers and indexes that use it are gone.
 
 ALTER TABLE "kortix"."gateway_request_logs" ADD COLUMN "served_model" text;--> statement-breakpoint
-ALTER TABLE "kortix"."gateway_request_logs" ADD COLUMN "usage_estimated" boolean;
+ALTER TABLE "kortix"."gateway_request_logs" ADD COLUMN "usage_estimated" boolean;--> statement-breakpoint
+
+-- The shared byte-bound helper the fill trigger (20261108090000100) and the
+-- backfill (20261108090000200) apply to every model string the v4 covering
+-- index carries as a btree tuple member (max ~2.7 KB): an oversized
+-- client-supplied model id must never reject the whole trace INSERT (54000,
+-- the fire-and-forget write then silently drops the usage/budget row) nor
+-- fail the CONCURRENTLY builds. Walks whole code points against the byte
+-- budget (never a mid-character cut — an unpaired surrogate would fail the
+-- UTF-8 column); the scaled estimate is bigint (CWE-190: an int4 multiply
+-- overflows on a huge text value).
+CREATE OR REPLACE FUNCTION "kortix"."clip_text_bytes"(value text, max_bytes int)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = kortix
+AS $fn$
+DECLARE
+  cut int;
+BEGIN
+  IF value IS NULL OR octet_length(value) <= max_bytes THEN
+    RETURN value;
+  END IF;
+  cut := greatest(max_bytes / 4, (max_bytes::bigint * char_length(value) / octet_length(value))::int);
+  value := left(value, cut);
+  WHILE octet_length(value) > max_bytes LOOP
+    value := left(value, char_length(value) - 1);
+  END LOOP;
+  RETURN value;
+END;
+$fn$;

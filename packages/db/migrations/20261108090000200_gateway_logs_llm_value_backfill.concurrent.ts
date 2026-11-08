@@ -25,11 +25,12 @@
 //
 // Readers keep reading metadata until this pass ran: migrations run before the
 // new pods start, so by the time the column-reading code serves traffic, this
-// pass has healed every row the OLD writer produced before it. Rows the old
-// writer produces during the deploy window (after the last batch, before the
-// new pods' first write) are healed by the fill trigger in
-// 20261108090000200, which lifts the same keys into the columns at insert for
-// every writer version.
+// pass has healed every row the OLD writer produced before it. The fill
+// trigger (20261108090000100) is installed BEFORE this pass: every insert
+// from the moment the trigger exists — the whole potentially-long backfill,
+// and every later deploy window — is lifted at insert; this pass heals only
+// the history that predates the trigger, and its predicate skips rows the
+// trigger already filled.
 
 export const shorthands = undefined;
 
@@ -54,41 +55,16 @@ export const up = async (pgm) => {
   };
 
   // Strix CWE-1284 (LOW finding on the PR): the two CONCURRENTLY builds
-  // below index requested_model / resolved_model as btree tuple members (max
-  // ~2.7 KB). A historical row written by the old writer (which bounded
-  // nothing) could carry an oversized model string and fail the BUILD with
-  // 54000, leaving an INVALID index. Bound history to the same 255 bytes per
-  // string the writer applies. Must run BEFORE the index builds
-  // (20261108090000300 / 20261108090000400), which it does by order.
-  //
-  // The shared byte-bound helper (the trigger in 20261108090000200 reuses
-  // it): walks whole code points against a byte budget — never a
-  // mid-character cut, which would hand an unpaired surrogate to the UTF-8
-  // column — with the scaled estimate done in bigint (CWE-190: an int4
-  // multiply overflows on a huge text value and would permanently block
-  // this migration).
-  await pgm.db.query(`
-    create or replace function kortix.clip_text_bytes(value text, max_bytes int)
-    returns text
-    language plpgsql
-    immutable
-    set search_path = kortix
-    as $fn$
-    declare
-      cut int;
-    begin
-      if value is null or octet_length(value) <= max_bytes then
-        return value;
-      end if;
-      cut := greatest(max_bytes / 4, (max_bytes::bigint * char_length(value) / octet_length(value))::int);
-      value := left(value, cut);
-      while octet_length(value) > max_bytes loop
-        value := left(value, char_length(value) - 1);
-      end loop;
-      return value;
-    end;
-    $fn$;
-  `);
+  // below index requested_model / resolved_model / served_model as btree
+  // tuple members (max ~2.7 KB). A historical row written by the old writer
+  // (which bounded nothing) could carry an oversized model string and fail
+  // the BUILD with 54000, leaving an INVALID index. Bound history to the
+  // same 255 bytes per string the writer applies. Must run BEFORE the index
+  // builds (20261108090000300 / 20261108090000400), which it does by order.
+  // Uses the shared byte-bound helper kortix.clip_text_bytes created by
+  // 20261108090000000 (walks whole code points against the byte budget —
+  // never a mid-character cut — with the scaled estimate in bigint, so a
+  // huge text value cannot overflow int4 and block this migration).
   await loop(`
     update kortix.gateway_request_logs
        set requested_model = kortix.clip_text_bytes(requested_model, 255),
@@ -105,7 +81,7 @@ export const up = async (pgm) => {
   // table writable throughout.
   await loop(`
     update kortix.gateway_request_logs
-       set served_model = metadata->>'servedModel',
+       set served_model = kortix.clip_text_bytes(metadata->>'servedModel', 255),
            usage_estimated = (metadata->>'usageEstimated') = 'true'
      where log_id in (
        select log_id

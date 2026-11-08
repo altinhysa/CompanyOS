@@ -54,7 +54,7 @@ export const shorthands = undefined;
 // its window.
 //
 // The served model and the estimated flag are now REAL columns
-// (20261108090000000 + the backfill in 20261108090000100) — a jsonb
+// (20261108090000000 + the backfill in 20261108090000200) — a jsonb
 // expression cannot join an INCLUDE list, and a btree expression key never
 // serves an index-only scan (verified on PG 17.6), so columns were the only
 // path back to a tight index-only plan. v4 carries every scalar column the

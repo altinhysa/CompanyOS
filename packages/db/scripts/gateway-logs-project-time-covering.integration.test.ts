@@ -532,7 +532,12 @@ suite('gateway_request_logs project aggregates are index-only', () => {
            ($1, $2, 'bf-sol-estimated', 'openai', 'gpt-6.1-sol', 'codex/gpt-6.1-sol', 200, true, 10, 1000, 500, 100, 0, 0.001, 0,
             jsonb_build_object('servedModel', 'codex/gpt-6.1-sol', 'usageEstimated', true), now()),
            ($1, $2, 'bf-sol-reported', 'openai', 'gpt-6.1-sol', 'codex/gpt-6.1-sol', 200, true, 10, 2000, 500, 100, 0, 0.002, 0,
-            jsonb_build_object('servedModel', 'codex/gpt-6.1-sol'), now())
+            jsonb_build_object('servedModel', 'codex/gpt-6.1-sol'), now()),
+           -- G9 item 1: an oversized historical servedModel (old writers bounded
+           -- nothing) is bounded by the backfill through clip_text_bytes, not
+           -- copied verbatim into the tuple member.
+           ($1, $2, 'bf-huge-served', 'kortix', 'served-c', 'req-c', 200, true, 10, 0, 0, 0, 0, 0, 0,
+            jsonb_build_object('servedModel', repeat('🚀', 300), 'usageEstimated', false), now())
       `,
         [edgeAccountId, edgeProjectId],
       );
@@ -548,7 +553,7 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     for (;;) {
       const { rowCount } = await client.query(`
         update kortix.gateway_request_logs
-           set served_model = metadata->>'servedModel',
+           set served_model = kortix.clip_text_bytes(metadata->>'servedModel', 255),
                usage_estimated = (metadata->>'usageEstimated') = 'true'
          where log_id in (
            select log_id
@@ -587,6 +592,8 @@ suite('gateway_request_logs project aggregates are index-only', () => {
         'bf-sol-estimated': ['codex/gpt-6.1-sol', true],
         // No usageEstimated key: the column stays NULL (never a guessed false).
         'bf-sol-reported': ['codex/gpt-6.1-sol', null],
+        // The oversized historical key is bounded, never copied verbatim.
+        'bf-huge-served': ['🚀'.repeat(63), false],
       });
 
     // The backfill's whole contract, on both projects' rows: the promoted
@@ -599,7 +606,11 @@ suite('gateway_request_logs project aggregates are index-only', () => {
         `select distinct
                 coalesce(served_model, case when provider = 'kortix' then resolved_model else requested_model end) as via_column,
                 coalesce(metadata->>'servedModel', case when provider = 'kortix' then resolved_model else requested_model end) as via_metadata
-           from kortix.gateway_request_logs where project_id = $1`,
+           from kortix.gateway_request_logs
+          where project_id = $1
+            -- the deliberately-truncated oversized row reads the bounded
+            -- prefix from the column, not the verbatim metadata key
+            and octet_length(metadata->>'servedModel') <= 255`,
         [pid],
       );
       expect(key.every((r) => r.via_column === r.via_metadata)).toBe(true);
@@ -616,5 +627,152 @@ suite('gateway_request_logs project aggregates are index-only', () => {
       );
       expect(value[0]?.via_column).toBe(value[0]?.via_metadata);
     }
+  });
+
+  // G9 item 1: a historical row the OLD writer produced can carry an
+  // oversized model string (nothing bounded it before the promotion); one
+  // such row over the btree tuple limit fails the CONCURRENTLY build with
+  // 54000 and leaves an INVALID index. The backfill must bound history
+  // first — then the build succeeds.
+  test('the backfill bounds oversized history and the v4 build then succeeds (G9 item 1)', async () => {
+    await superuser.query(`drop index if exists kortix.${INDEX}`);
+    await superuser.query(
+      'alter table kortix.gateway_request_logs disable trigger fill_promoted_columns',
+    );
+    try {
+      await client.query(
+        `insert into kortix.gateway_request_logs
+           (account_id, project_id, request_id, requested_model, resolved_model, provider,
+            status, ok, billing_mode, final_cost_precise, upstream_cost_precise, metadata, created_at)
+         values ($1, $2, 'bf-oversized', repeat('M', 3000), repeat('🚀', 400), 'openai',
+                 200, true, 'none', 0, 0,
+                 jsonb_build_object('servedModel', repeat('🚀', 300)), now())`,
+        [edgeAccountId, edgeProjectId],
+      );
+    } finally {
+      await superuser.query(
+        'alter table kortix.gateway_request_logs enable trigger fill_promoted_columns',
+      );
+    }
+    // The migration's own statements (20261108090000200): the truncation
+    // passes, then the promoted-columns pass — verbatim, in order.
+    for (;;) {
+      const { rowCount } = await client.query(`
+        update kortix.gateway_request_logs
+           set requested_model = kortix.clip_text_bytes(requested_model, 255),
+               resolved_model  = kortix.clip_text_bytes(resolved_model, 255)
+         where log_id in (
+           select log_id from kortix.gateway_request_logs
+            where octet_length(requested_model) > 255 or octet_length(resolved_model) > 255
+            limit 5000
+         )
+      `);
+      if (!rowCount) break;
+    }
+    for (;;) {
+      const { rowCount } = await client.query(`
+        update kortix.gateway_request_logs
+           set served_model = kortix.clip_text_bytes(metadata->>'servedModel', 255),
+               usage_estimated = (metadata->>'usageEstimated') = 'true'
+         where log_id in (
+           select log_id from kortix.gateway_request_logs
+            where (served_model is null and metadata ? 'servedModel'
+                   and metadata->>'servedModel' is not null)
+               or (usage_estimated is null and metadata ? 'usageEstimated'
+                   and metadata->>'usageEstimated' is not null)
+            limit 5000
+         )
+      `);
+      if (!rowCount) break;
+    }
+    const { rows: bounded } = await client.query<{ requested_model: string; resolved_model: string; served_model: string | null }>(
+      `select requested_model, resolved_model, served_model
+         from kortix.gateway_request_logs where request_id = 'bf-oversized'`,
+    );
+    expect(bounded).toHaveLength(1);
+    expect(Buffer.byteLength(bounded[0]!.requested_model, 'utf8')).toBe(255);
+    expect(Buffer.byteLength(bounded[0]!.resolved_model, 'utf8')).toBe(252);
+    expect(Buffer.byteLength(bounded[0]!.served_model ?? '', 'utf8')).toBe(252);
+    // The bounded history no longer overflows the tuple: the migration's own
+    // build statement succeeds.
+    await superuser.query(`set statement_timeout = '5min'`);
+    await superuser.query(V4_DEFINITION);
+    const { rows: valid } = await superuser.query<{ indisvalid: boolean }>(
+      `select i.indisvalid from pg_class c join pg_index i on i.indexrelid = c.oid
+        where c.relname = $1`,
+      [INDEX],
+    );
+    expect(valid[0]).toMatchObject({ indisvalid: true });
+  });
+
+  // G9 item 2: the fill trigger is installed BEFORE the backfill runs, so an
+  // old-writer insert that lands while the (potentially long) backfill is
+  // running is healed at insert and the backfill's predicate skips it —
+  // nothing between the two steps can leave a promoted column NULL forever.
+  test('an insert that lands during the backfill is healed by the trigger and the backfill skips it (G9 item 2)', async () => {
+    // The pre-trigger window: a row the trigger never saw (disabled insert).
+    await superuser.query(
+      'alter table kortix.gateway_request_logs disable trigger fill_promoted_columns',
+    );
+    try {
+      await client.query(
+        `insert into kortix.gateway_request_logs
+           (account_id, project_id, request_id, requested_model, resolved_model, provider,
+            status, ok, billing_mode, final_cost_precise, upstream_cost_precise, metadata, created_at)
+         values ($1, $2, 'il-history', 'req-x', 'served-x', 'kortix', 200, true, 'none', 0, 0,
+                 jsonb_build_object('servedModel', 'served-x', 'usageEstimated', true), now())`,
+        [edgeAccountId, edgeProjectId],
+      );
+    } finally {
+      await superuser.query(
+        'alter table kortix.gateway_request_logs enable trigger fill_promoted_columns',
+      );
+    }
+    // An insert that lands while the backfill is running: the trigger fills
+    // it at insert.
+    await client.query(
+      `insert into kortix.gateway_request_logs
+         (account_id, project_id, request_id, requested_model, resolved_model, provider,
+          status, ok, billing_mode, final_cost_precise, upstream_cost_precise, metadata, created_at)
+       values ($1, $2, 'il-during', 'req-y', 'served-y', 'kortix', 200, true, 'none', 0, 0,
+               jsonb_build_object('servedModel', 'served-y', 'usageEstimated', true), now())`,
+      [edgeAccountId, edgeProjectId],
+    );
+    const { rows: duringBefore } = await client.query<{ served_model: string | null }>(
+      `select served_model from kortix.gateway_request_logs where request_id = 'il-during'`,
+    );
+    expect(duringBefore[0]?.served_model).toBe('served-y');
+
+    // The backfill runs over both rows; its predicate only selects NULL
+    // columns, so the trigger-filled row is untouched.
+    for (;;) {
+      const { rowCount } = await client.query(`
+        update kortix.gateway_request_logs
+           set served_model = kortix.clip_text_bytes(metadata->>'servedModel', 255),
+               usage_estimated = (metadata->>'usageEstimated') = 'true'
+         where log_id in (
+           select log_id from kortix.gateway_request_logs
+            where (served_model is null and metadata ? 'servedModel'
+                   and metadata->>'servedModel' is not null)
+               or (usage_estimated is null and metadata ? 'usageEstimated'
+                   and metadata->>'usageEstimated' is not null)
+            limit 5000
+         )
+      `);
+      if (!rowCount) break;
+    }
+
+    const { rows: after } = await client.query<{ request_id: string; served_model: string | null; usage_estimated: boolean | null }>(
+      `select request_id, served_model, usage_estimated
+         from kortix.gateway_request_logs
+        where request_id in ('il-history', 'il-during') order by request_id`,
+    );
+    expect(Object.fromEntries(after.map((r) => [r.request_id, [r.served_model, r.usage_estimated]]))).toEqual({
+      // History: healed by the backfill.
+      'il-history': ['served-x', true],
+      // The during-backfill insert: healed by the trigger, unchanged by the
+      // backfill.
+      'il-during': ['served-y', true],
+    });
   });
 });

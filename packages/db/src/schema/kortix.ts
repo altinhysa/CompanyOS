@@ -4982,8 +4982,8 @@ export const gatewayRequestLogs = kortixSchema.table(
     // reading them can scan the covering indexes index-only — a jsonb
     // expression can join an index only as a btree key, and btree expression
     // keys never serve index-only scans (verified on PG 17.6). Nullable: the
-    // backfill (20261108090000100) and the insert-time fill trigger
-    // (20261108090000200) lift the metadata keys for every writer version, so
+    // backfill (20261108090000200) and the insert-time fill trigger
+    // (20261108090000100) lift the metadata keys for every writer version, so
     // a NULL column means the row never carried the key, and the readers fall
     // back to the requested/resolved columns (session-model-usage.ts
     // servedModelSql) or to not-estimated (llm-value.ts) — exactly as a

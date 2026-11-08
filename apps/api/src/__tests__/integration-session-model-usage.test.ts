@@ -287,11 +287,13 @@ describe('sessionModelUsage', () => {
   // The trigger applies the writer's bound to the lifted key: an old writer's
   // metadata.servedModel is client/upstream-influenced and unbounded (old
   // writers predate boundMetadata), and the v4 covering index carries
-  // served_model as a btree tuple member.
-  test('the trigger bounds an oversized old-writer servedModel to 255 code points', async () => {
+  // served_model as a btree tuple member. The bound is BYTES, not code
+  // points (255 astral code points are up to 1020 bytes — the tuple would
+  // still overflow).
+  test('the trigger bounds an oversized old-writer servedModel to 255 bytes', async () => {
     await session('rollout-bound');
     await turn('rollout-bound', 'msg_rb_1', 0, 30);
-    const served = '🚀'.repeat(300); // 300 code points, 600 UTF-16 units
+    const served = '🚀'.repeat(300); // 300 code points = 1200 UTF-8 bytes
     await db.execute(sql`
       insert into kortix.gateway_request_logs
         (request_id, account_id, project_id, session_id, requested_model, resolved_model,
@@ -302,7 +304,7 @@ describe('sessionModelUsage', () => {
     `);
 
     const usage = await usageOf('rollout-bound');
-    const expected = '🚀'.repeat(255);
+    const expected = '🚀'.repeat(63); // 63 × 4B = 252 ≤ 255; the 64th rocket would exceed
     expect(usage.latest?.served_model).toBe(expected);
   });
 

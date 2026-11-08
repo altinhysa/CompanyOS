@@ -50,11 +50,26 @@ RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = kortix
 AS $$
+DECLARE
+  raw text;
 BEGIN
-  -- left(..., 255): the same bound the new writer applies to the promoted
-  -- model strings (btree tuple guard; real model ids are far shorter).
-  IF NEW.served_model IS NULL THEN
-    NEW.served_model := left(NEW.metadata ->> 'servedModel', 255);
+  -- The same 255-byte bound the new writer applies to the promoted model
+  -- strings (the v4 covering index carries served_model as a btree tuple
+  -- member; old writers predate boundMetadata, so their metadata key is
+  -- unbounded). Code-point cut first (scaled from the byte/char ratio, so
+  -- the estimate is within one code point of the budget), then drop whole
+  -- code points until within the budget — never a mid-character cut.
+  IF NEW.served_model IS NULL AND NEW.metadata ? 'servedModel' THEN
+    raw := NEW.metadata ->> 'servedModel';
+    IF raw IS NOT NULL THEN
+      IF octet_length(raw) > 255 THEN
+        raw := left(raw, greatest(63, (255 * char_length(raw) / octet_length(raw))::int));
+        WHILE octet_length(raw) > 255 LOOP
+          raw := left(raw, char_length(raw) - 1);
+        END LOOP;
+      END IF;
+      NEW.served_model := raw;
+    END IF;
   END IF;
   IF NEW.usage_estimated IS NULL AND NEW.metadata ->> 'usageEstimated' IS NOT NULL THEN
     NEW.usage_estimated := (NEW.metadata ->> 'usageEstimated') = 'true';

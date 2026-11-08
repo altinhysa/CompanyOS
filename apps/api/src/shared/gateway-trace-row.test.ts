@@ -113,19 +113,22 @@ describe('buildGatewayTraceRow', () => {
   // strings as btree tuple members (max ~2.7 KB). A client-supplied model
   // name of incompressible text must not be able to reject the whole trace
   // insert (the write is fire-and-forget: a rejection silently drops the
-  // usage/budget row). Bound every model string at the single write site.
-  test('bounds the client-supplied model strings to 255 code points (the covering-index tuple guard)', () => {
+  // usage/budget row). Bound every model string at the single write site —
+  // BYTES, not code points: 255 astral code points are up to 1020 UTF-8
+  // bytes and the tuple would still overflow.
+  test('bounds the client-supplied model strings to 255 bytes (the covering-index tuple guard)', () => {
     const huge = 'X'.repeat(10_000);
-    const emojiPad = '🚀'.repeat(300); // 600 UTF-16 units, 300 code points
+    const rockets = '🚀'.repeat(300); // 300 code points = 1200 UTF-8 bytes
     const row = buildGatewayTraceRow(
       baseInput({
         requestedModel: huge,
-        resolvedModel: emojiPad,
+        resolvedModel: rockets,
         metadata: { servedModel: `a\u0000${huge}` },
       }),
     );
-    expect(row.requestedModel).toHaveLength(255);
-    expect(Array.from(row.resolvedModel)).toHaveLength(255); // code points, not UTF-16 units
+    expect(Buffer.byteLength(row.requestedModel, 'utf8')).toBe(255);
+    expect(Buffer.byteLength(row.resolvedModel, 'utf8')).toBe(252); // 63 × 4B; the 64th rocket would exceed
+    expect(Array.from(row.resolvedModel)).toHaveLength(63); // whole code points, never a split surrogate
     expect(row.servedModel).toBe(`a${'X'.repeat(254)}`); // NUL stripped, then bounded
   });
 });

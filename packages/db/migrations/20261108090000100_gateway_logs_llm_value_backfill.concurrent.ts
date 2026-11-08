@@ -53,6 +53,45 @@ export const up = async (pgm) => {
     throw new Error('gateway_logs_llm_value_backfill: batch bound reached');
   };
 
+  // Strix CWE-1284 (LOW finding on the PR): the two CONCURRENTLY builds
+  // below index requested_model / resolved_model as btree tuple members (max
+  // ~2.7 KB). A historical row written by the old writer (which bounded
+  // nothing) could carry an oversized model string and fail the BUILD with
+  // 54000, leaving an INVALID index. Bound history to the same 255 bytes per
+  // string the writer applies: one scaled code-point cut (never
+  // mid-character), then single-code-point drops until within the budget —
+  // every pass's predicate strictly shrinks. Pathological rows only: real
+  // model ids are far shorter than 255 bytes. Must run BEFORE the index
+  // builds (20261108090000300 / 20261108090000400), which it does by order.
+  await loop(`
+    update kortix.gateway_request_logs
+       set requested_model = left(requested_model, greatest(63, (255 * char_length(requested_model) / octet_length(requested_model))::int)),
+           resolved_model  = left(resolved_model,  greatest(63, (255 * char_length(resolved_model)  / octet_length(resolved_model))::int))
+     where log_id in (
+       select log_id from kortix.gateway_request_logs
+        where octet_length(requested_model) > 255 or octet_length(resolved_model) > 255
+        limit ${BATCH}
+     )
+  `);
+  await loop(`
+    update kortix.gateway_request_logs
+       set requested_model = left(requested_model, char_length(requested_model) - 1)
+     where log_id in (
+       select log_id from kortix.gateway_request_logs
+        where octet_length(requested_model) > 255 and char_length(requested_model) > 0
+        limit ${BATCH}
+     )
+  `);
+  await loop(`
+    update kortix.gateway_request_logs
+       set resolved_model = left(resolved_model, char_length(resolved_model) - 1)
+     where log_id in (
+       select log_id from kortix.gateway_request_logs
+        where octet_length(resolved_model) > 255 and char_length(resolved_model) > 0
+        limit ${BATCH}
+     )
+  `);
+
   // Row locks only, 5s budget: writers never queue behind a batch. Each batch
   // is its own committed transaction, so the pass is resumable and keeps the
   // table writable throughout.

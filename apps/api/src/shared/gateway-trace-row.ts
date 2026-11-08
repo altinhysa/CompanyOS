@@ -35,13 +35,24 @@ function nonNegInt(value: number | undefined) {
 }
 
 // The covering indexes (v4's INCLUDE, idx_gateway_logs_model) carry these
-// strings as btree tuple members (max ~2.7 KB): bound to 255 code points so
-// no client-supplied model id can exceed the tuple limit and silently drop
-// the whole trace row (Strix CWE-1284). Array.from, not slice: a slice can
-// split a surrogate pair and the unpaired half would fail the UTF-8 insert.
-const MODEL_MAX_CHARS = 255;
-const clipText = (value: string, chars: number = MODEL_MAX_CHARS) =>
-  Array.from(value).slice(0, chars).join('');
+// strings as btree tuple members (max ~2.7 KB): bound each to 255 UTF-8
+// BYTES so no client-supplied model id can exceed the tuple limit and
+// silently drop the whole trace row (Strix CWE-1284). Walked by code point
+// (Array.from), never string slice: a boundary slice can split a surrogate
+// pair and the unpaired half would fail the UTF-8 insert. A code-point cap
+// would not suffice — 255 astral code points are up to 1020 bytes.
+const MODEL_MAX_BYTES = 255;
+const clipText = (value: string, maxBytes: number = MODEL_MAX_BYTES) => {
+  let bytes = 0;
+  let out = '';
+  for (const ch of value) {
+    const size = Buffer.byteLength(ch);
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    out += ch;
+  }
+  return out;
+};
 
 // metadata rode in a btree tuple while a covering index carried it
 // (idx_gateway_logs_project_time_covering v2/v3, KRTX-4022/KRTX-4449: max

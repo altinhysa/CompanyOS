@@ -96,7 +96,12 @@ accessControlApp.openapi(
       return c.json({ allowed: true, mode: 'sso' as const });
     }
     // Eligibility, not account history: an address that holds an account and
-    // one that may create one get the identical body.
+    // one that may create one get the identical body. The one-email-per-minute
+    // cooldown is enforced (and answered 429) on the email-sending routes
+    // (auth/email-cooldown.ts) — disclosing it HERE would re-open the oracle:
+    // its only source is the auth DB, which exists for accounts and not for
+    // the rest, so a triggered send plus this answer would again say who
+    // holds an account.
     if (canSignUp(email)) return c.json({ allowed: true });
     return c.json({ allowed: false, mode: 'closed' as const });
   },

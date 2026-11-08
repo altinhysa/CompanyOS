@@ -59,6 +59,17 @@ export function resolveEmailFlowMode(check: unknown): EmailFlowMode {
 }
 
 /**
+ * One auth email per address per minute: the window the API enforces
+ * (apps/api/src/auth/email-cooldown.ts), the resend countdown the form shows,
+ * and the send actions' session-cookie skipping (web actions.ts). Reading the
+ * cooldown off the anonymous check-email would re-open KRTX-3504's enumeration
+ * oracle: its only honest server-side source is the auth DB, which has a row
+ * for accounts and nothing for the rest, so a triggered send plus that answer
+ * would tell an anonymous caller who holds an account.
+ */
+export const AUTH_EMAIL_COOLDOWN_SECONDS = 60;
+
+/**
  * Human copy for a rate-limited auth request. GoTrue surfaces its own error
  * strings ("Email rate limit exceeded") and the auth screen used to show one
  * raw as the toast heading; this maps the rate-limit codes to guidance

@@ -18,6 +18,7 @@ mock.module('../config', () => ({
 // and the parity tests below assert the body did not move in either.
 let dbAnswer: 'row' | 'throws' = 'row';
 mock.module('../shared/db', () => ({
+  withDbTransaction: <T,>(action: () => Promise<T>): Promise<T> => action(),
   db: {
     insert: () => ({ values: async () => {} }),
     execute: async () => {

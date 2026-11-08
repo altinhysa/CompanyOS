@@ -1,10 +1,7 @@
 'use server';
 
-import {
-  AUTH_TIMEOUT_AUTH_ERROR,
-  AUTH_UPSTREAM_TIMEOUT_MS,
-  settleWithin,
-} from '@/lib/auth/submit-auth';
+import { AUTH_TIMEOUT_AUTH_ERROR, AUTH_UPSTREAM_TIMEOUT_MS } from '@/lib/auth/submit-auth';
+import { settleWithin } from '@/lib/deadline';
 import { buildMobileSessionHandoffUrl } from '@/lib/auth/mobile-handoff';
 import {
   resolveNewAccountReturnUrl,
@@ -13,6 +10,7 @@ import {
 } from '@/lib/auth/return-url';
 import { clearAuthBounceCookie } from '@/lib/auth/sign-out-actions';
 import {
+  AUTH_EMAIL_COOLDOWN_SECONDS,
   type EmailFlowMode,
   SIGNUPS_CLOSED_MESSAGE,
   SSO_REQUIRED_MESSAGE,
@@ -148,6 +146,49 @@ async function checkEmailFlowMode(email: string): Promise<EmailFlowMode> {
   }
 }
 
+/* Server-side cooldown for the send actions: after a send this browser
+ * remembers the address for one minute (the window the API enforces on its
+ * email-sending routes, apps/api/src/auth/email-cooldown.ts), and a
+ * re-submit inside the window answers "already sent" without repeating the
+ * GoTrue call — GoTrue mails an unconfirmed address again on every call.
+ * The window is deliberately NOT disclosed through the anonymous check-email
+ * (KRTX-3504): its only honest source there is the auth DB, which has a row
+ * for accounts and nothing for the rest, so a triggered send plus that
+ * answer would re-open the enumeration oracle the issue closed. This cookie
+ * is one visitor's own record of what already happened in this session — it
+ * says nothing about any other address, so no caller can probe an account
+ * with it.
+ */
+const AUTH_EMAIL_SENT_COOKIE = 'kortix-auth-email-sent';
+
+/** Seconds left before this browser may send to `email` again, or null when
+ * the minute is over (or no send happened in this session). */
+async function sentAuthEmailCooldown(email: string): Promise<number | null> {
+  const [sentEmail, sentAtRaw] = ((await cookies()).get(AUTH_EMAIL_SENT_COOKIE)?.value ?? '').split('|');
+  const sentAt = Number(sentAtRaw);
+  if (sentEmail !== email || !Number.isFinite(sentAt)) return null;
+  const left = Math.ceil(AUTH_EMAIL_COOLDOWN_SECONDS - Math.max(0, (Date.now() - sentAt) / 1000));
+  return left > 0 ? left : null;
+}
+
+/** Remember a send this visitor just made. An unwritable cookie store only
+ * loses the skip: the cooldown stays enforced on the API's email routes. */
+async function markAuthEmailSent(email: string): Promise<void> {
+  try {
+    (await cookies()).set({
+      name: AUTH_EMAIL_SENT_COOKIE,
+      value: `${email}|${Date.now()}`,
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: AUTH_EMAIL_COOLDOWN_SECONDS,
+    });
+  } catch {
+    console.warn('[auth] could not write the auth email cooldown cookie');
+  }
+}
+
 /**
  * The unified flow's existence resolution. Never exposed as a raw endpoint to
  * the browser beyond this server action; the API behind it is rate-limited
@@ -215,6 +256,24 @@ export async function sendEmailCode(prevState: any, formData: FormData) {
     ? resolveNewAccountReturnUrl(requestedReturnUrl)
     : requestedReturnUrl;
 
+  // An auth email went to this address in this browser's window: its link
+  // and code still work, so answer the link step with the time left instead
+  // of mailing the address again. No GoTrue call means no new PKCE verifier,
+  // so the one this browser already holds still matches the mailed link.
+  const emailRetryAfterSeconds = await sentAuthEmailCooldown(normalizedEmail);
+  if (emailRetryAfterSeconds) {
+    return {
+      success: true,
+      alreadySent: true,
+      message: tI18nComplete.raw('authEmailAlreadySent'),
+      email: normalizedEmail,
+      redirectTo: returnUrl,
+      codeVerifier: null,
+      mode: flowMode,
+      retryAfterSeconds: emailRetryAfterSeconds,
+    };
+  }
+
   const supabase = await createClient();
   const emailRedirectTo = emailRedirectUrl({
     origin,
@@ -258,6 +317,10 @@ export async function sendEmailCode(prevState: any, formData: FormData) {
     }
   }
 
+  // A delivered send starts the window: a re-submit answers "already sent"
+  // (above) instead of mailing the address again.
+  if (!error) await markAuthEmailSent(normalizedEmail);
+
   // Hand the PKCE verifier to the browser in the RESULT, not only as a
   // Set-Cookie header: on the prod edge deployment the action's cookie writes
   // never reached the browser (a successful send left the jar empty —
@@ -288,6 +351,7 @@ export async function sendEmailCode(prevState: any, formData: FormData) {
     // on closed signups the send was sign-in-only-if-the-account-exists —
     // `mode` tells the step which copy is honest.
     mode: flowMode,
+    retryAfterSeconds: AUTH_EMAIL_COOLDOWN_SECONDS,
   };
 }
 
@@ -527,25 +591,36 @@ export async function signUpWithPassword(prevState: any, formData: FormData) {
     mobileState,
   });
 
-  const { error: signUpError } = await settleWithin(
-    supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo },
-    }),
-    AUTH_UPSTREAM_TIMEOUT_MS,
-    () => ({ data: { user: null, session: null }, error: AUTH_TIMEOUT_AUTH_ERROR }),
-  );
+  // GoTrue mails the confirmation again on every signUp for an unconfirmed
+  // address. When this browser's window is already cooling, the address was
+  // just submitted once, so skip signUp: the sign-in below still lets a
+  // confirmed account in, and an unconfirmed one gets "already sent" instead
+  // of one more email per click.
+  const emailRetryAfterSeconds = await sentAuthEmailCooldown(email);
+  const { error: signUpError } = emailRetryAfterSeconds
+    ? { error: null }
+    : await settleWithin(
+        supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo },
+        }),
+        AUTH_UPSTREAM_TIMEOUT_MS,
+        () => ({ data: { user: null, session: null }, error: AUTH_TIMEOUT_AUTH_ERROR }),
+      );
 
   const alreadyExists =
-    signUpError &&
-    (signUpError.message?.toLowerCase().includes('already registered') ||
-      signUpError.message?.toLowerCase().includes('already exists') ||
-      signUpError.status === 422);
+    !!emailRetryAfterSeconds ||
+    (signUpError &&
+      (signUpError.message?.toLowerCase().includes('already registered') ||
+        signUpError.message?.toLowerCase().includes('already exists') ||
+        signUpError.status === 422));
 
   if (signUpError && !alreadyExists) {
     return authFailure(signUpError, 'Could not create account', tI18nComplete);
   }
+
+  if (!signUpError) await markAuthEmailSent(email);
 
   const { data: signInData, error: signInError } = await settleWithin(
     supabase.auth.signInWithPassword({
@@ -566,9 +641,13 @@ export async function signUpWithPassword(prevState: any, formData: FormData) {
     ) {
       return {
         success: true,
-        message: tI18nComplete.raw('textac0a6f3b5c61'),
+        message: tI18nComplete.raw(
+          emailRetryAfterSeconds ? 'authEmailAlreadySent' : 'textac0a6f3b5c61',
+        ),
         email,
         requiresEmailConfirmation: true,
+        alreadySent: !!emailRetryAfterSeconds,
+        retryAfterSeconds: emailRetryAfterSeconds ?? AUTH_EMAIL_COOLDOWN_SECONDS,
       };
     }
     if (alreadyExists) {

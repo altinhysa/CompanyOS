@@ -1109,7 +1109,7 @@ The workspace registers what exists. Each agent enables what it uses, by name. A
 | `options` | map | — | Accepted. Sessions do not use it. |
 | `permission` | `ask`, `allow`, `deny` or map | `allow` | Which tool calls run, ask a person, or never run: `allow`, `ask` or `deny` (`"*"` and `all` also mean `allow`). `skill` and `task` belong to `skills` and `subagents`. See [Permission rules](#permission-rules). |
 | `prompt` | string | — | The system prompt. Set `prompt` or `prompt_file`, not both. |
-| `prompt_file` | string | — | A repository path to a `.md` file. The file is the system prompt. A leading `---` frontmatter block is dropped, so an agent file another tool reads (`.claude/agents/<name>.md`) works as is. |
+| `prompt_file` | string | — | A repository path to a `.md` file. The whole file is the system prompt. |
 | `enabled` | boolean | `true` | `false`: no session starts with the agent, and no agent starts it as a subagent. |
 | `codemode` | `on`, `only`, `off` | `on` | `on`: the model gets every tool plus `codemode`, which runs one JavaScript script that calls the other tools. `only`: `codemode` alone. `off`: no `codemode`. A script's calls follow the agent's `permission`. |
 | `context` | `record`, `summary` | `record` | What happens when the session's context fills. `record`: the agent continues at once in a fresh context and searches the session's full record, word for word, when it needs a detail; nothing is summarized. `summary`: a model call writes a summary of the conversation and the agent continues from it. |
@@ -1124,8 +1124,6 @@ The workspace registers what exists. Each agent enables what it uses, by name. A
 | `secrets` | grant | `none` | Secret names the agent's sandbox receives. |
 | `apps` | grant | `none` | App slugs the agent may open when the App's access is restricted or private. |
 | `kortix_permissions` | grant | `none` | Project permissions (`project.*`) the agent holds, whoever starts the session. `kortix validate --scopes` prints them. An account permission is an error. See [Agents](/docs/guide#agents). |
-| `workspace` | `branch`, `runtime`, `read` | — | What new sessions of this agent get in /workspace. Any other key under `workspace` is an error. |
-| `workspace.project_repository` | boolean | `false` | `true`: new sessions check out the project repository in `/workspace`, on their own session branch. `false`: no checkout, and repository calls answer `403` `session_repository_access_denied`. Project tools still load. |
 | `sandbox` | string | `sandbox.default` | A template slug, or `default` for the platform image. |
 | `space` | string | — | The space the agent works in (a key of the top-level `spaces` map, or a bare slug). Grouping only. |
 | `network_egress` | map | — | Only `{ version: 1, default: deny, rules: [] }`. It validates with a warning: Kortix does not enforce it. |

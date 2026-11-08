@@ -176,6 +176,18 @@ export const DEPRECATIONS: readonly Deprecation[] = [
       }),
   },
   {
+    id: 'agent-workspace',
+    since: '2026-11-08',
+    summary:
+      "`workspace` is obsolete: a session never checks out the project repository at boot. Delete the key; an agent that needs the files runs `kortix workspaces clone`.",
+    apply: (doc) =>
+      agentBlocks(doc).flatMap(([name, block]) => {
+        const keys = ['workspace', 'repository_access'].filter((key) => block.has(key));
+        for (const key of keys) deleteKeepingComments(block, key);
+        return keys.map((key) => `agents.${name}.${key}`);
+      }),
+  },
+  {
     id: 'sandbox-templates',
     since: '2026-09-15',
     summary: 'the top-level `sandboxes` list is now `sandbox.templates`.',

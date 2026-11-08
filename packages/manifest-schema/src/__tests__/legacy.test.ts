@@ -120,8 +120,6 @@ describe('a kortix_version 2 project', () => {
       connectors: '*',
       secrets: ['HELPDESK_TOKEN'],
       kortix_permissions: '*',
-      // v2 cloned the repository when the key was omitted.
-      workspace: { project_repository: true },
     });
     expect(agents.reviewer).toEqual({
       description: 'Reviews.',
@@ -132,7 +130,6 @@ describe('a kortix_version 2 project', () => {
       skills: ['triage', 'kortix-system'],
       commands: ['weekly-report'],
       codemode: 'only',
-      workspace: { project_repository: false },
     });
     expect(raw.triggers).toEqual([{ slug: 'nightly', type: 'cron', agent: 'reviewer', cron: '0 0 3 * * *', prompt: 'Review.' }]);
     // OpenCode plugins did nothing on pi: reported, not carried over.
@@ -226,7 +223,7 @@ describe('a kortix.toml (kortix_version = 1) project', () => {
     expect(validateManifest(raw).issues.filter((i) => i.severity === 'error')).toEqual([]);
     expect(raw.default_agent).toBe('ops');
     const agents = raw.agents as Record<string, Record<string, unknown>>;
-    expect(agents.ops).toMatchObject({ mode: 'primary', description: 'Runs ops.', permission: { bash: 'ask' }, connectors: 'none', secrets: ['HELPDESK_TOKEN'], kortix_permissions: '*', skills: '*', workspace: { project_repository: true } });
+    expect(agents.ops).toMatchObject({ mode: 'primary', description: 'Runs ops.', permission: { bash: 'ask' }, connectors: 'none', secrets: ['HELPDESK_TOKEN'], kortix_permissions: '*', skills: '*' });
     expect(agents.helper).toMatchObject({ mode: 'subagent', connectors: '*', secrets: '*', kortix_permissions: '*', skills: '*', tools: '*' });
     // The written kortix.yaml spells "every" as a double-quoted "*".
     const written = changes.find((c) => c.path === 'kortix.yaml')!.content!;

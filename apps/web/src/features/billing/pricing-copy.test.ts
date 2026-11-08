@@ -115,6 +115,23 @@ describe('pricing copy', () => {
     expect(english.billing.pricing.faq.models.answer).toContain('{fee}% platform fee');
   });
 
+  // resolve-billing.ts `paysForManagedModels`: the free family never gets managed
+  // models, so the Free card must say what sending needs (KRTX-4494).
+  test('the Free plan states models run on your own key, and managed models are paid', () => {
+    const free = PRICING_PLANS.find((plan) => plan.id === 'free');
+    if (!free) throw new Error('the Free plan card is missing from PRICING_PLANS');
+    const features = free.features.join(' ');
+    expect(features).toContain('Models run on your own API key or ChatGPT subscription');
+    expect(features).toContain('Managed models are on the Credits plan only');
+    expect(features).not.toContain('premium model');
+    expect(english.billing.pricing.faq.free.answer).toContain('Kortix-managed models need Credits');
+  });
+
+  test('the compare table marks managed models off for Free, and names no retired model', () => {
+    expect(pageSource).toContain("label: 'Managed models: DeepSeek, GLM', marks: [false, true, true]");
+    expect(pageSource).not.toContain('Kimi');
+  });
+
   test('the top-up FAQ states the bonus ladder from compute-pricing, not literals', () => {
     const answer = english.billing.pricing.faq.topup.answer;
     for (const token of ['{smallestBonus}', '{smallestBonusUsd}', '{largestBonus}', '{largestBonusUsd}']) {

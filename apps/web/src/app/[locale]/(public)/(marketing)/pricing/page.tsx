@@ -98,7 +98,9 @@ function compareGroups(
     {
       title: 'Models',
       rows: [
-        { label: 'Managed models: Kimi, DeepSeek, GLM', marks: [true, true, true] },
+        // Free never gets managed models (resolve-billing.ts `paysForManagedModels`),
+        // so the Free mark is false. DeepSeek and GLM only — no retired lineup names.
+        { label: 'Managed models: DeepSeek, GLM', marks: [false, true, true] },
         { label: 'Your own API keys', marks: [true, true, true] },
         { label: 'ChatGPT subscription', marks: [true, true, true] },
         { label: 'Higher model rate limits', marks: [false, true, true] },

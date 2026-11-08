@@ -4976,6 +4976,20 @@ export const gatewayRequestLogs = kortixSchema.table(
     request: jsonb('request').$type<Record<string, unknown>>(),
     response: jsonb('response').$type<Record<string, unknown>>(),
     metadata: jsonb('metadata').default({}).$type<Record<string, unknown>>(),
+    // KRTX-4023: the model that answered and the usage-was-estimated flag,
+    // promoted from `metadata` (`servedModel` / `usageEstimated` keys, kept
+    // in sync by the writer) into real columns so the dashboard aggregates
+    // reading them can scan the covering indexes index-only — a jsonb
+    // expression can join an index only as a btree key, and btree expression
+    // keys never serve index-only scans (verified on PG 17.6). Nullable: the
+    // backfill (20261108090000200) and the insert-time fill trigger
+    // (20261108090000100) lift the metadata keys for every writer version, so
+    // a NULL column means the row never carried the key, and the readers fall
+    // back to the requested/resolved columns (session-model-usage.ts
+    // servedModelSql) or to not-estimated (llm-value.ts) — exactly as a
+    // missing metadata key reads.
+    servedModel: text('served_model'),
+    usageEstimated: boolean('usage_estimated'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -5022,18 +5036,23 @@ export const gatewayRequestLogs = kortixSchema.table(
     // memberRows/projectAgg + budgetSpends, gateway overview, gateway series,
     // gateway sources): index-only scan by (project_id, created_at) that never
     // touches the wide request/response jsonb heap rows. Built CONCURRENTLY
-    // with INCLUDE (session_id, account_id, ok, billing_mode,
+    // with INCLUDE (account_id, session_id, ok, provider, requested_model,
+    // resolved_model, served_model, usage_estimated, billing_mode,
     // final_cost_precise, upstream_cost_precise, input_tokens, output_tokens,
-    // latency_ms, actor_user_id, provider, resolved_model, cached_tokens,
-    // cache_write_tokens, metadata) — not expressible in drizzle-orm 0.45's
-    // index builder; the schema contract checks relation + uniqueness only,
-    // same pattern as idx_gateway_logs_account_time_covering — by
-    // 20261107164457464_gateway_logs_project_time_covering_v3.concurrent.ts
+    // cached_tokens, cache_write_tokens, latency_ms, actor_user_id) — not
+    // expressible in drizzle-orm 0.45's index builder; the schema contract
+    // checks relation + uniqueness only, same pattern as
+    // idx_gateway_logs_account_time_covering — by
+    // 20261108090000300_gateway_logs_project_time_covering_v4.concurrent.ts
     // (KRTX-4022: the value columns are what the usage-value aggregate of
     // KRTX-3560 reads; KRTX-4449: session_id and account_id are what the
     // sources aggregate's attribution join and CostScope predicate read;
+    // KRTX-4023: the promoted served_model/usage_estimated pair replaces the
+    // v3 `metadata` INCLUDE — a promoted column read cannot be served from a
+    // jsonb tuple, and dropping metadata takes its 2 KB/row out of the index
+    // — and requested_model is back for the breakdown's fallback arm;
     // without them every window row is still heap-fetched).
-    index('idx_gateway_logs_project_time_covering_v3').on(table.projectId, table.createdAt),
+    index('idx_gateway_logs_project_time_covering_v4').on(table.projectId, table.createdAt),
   ],
 );
 

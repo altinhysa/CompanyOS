@@ -4406,10 +4406,13 @@ export const gatewayRequestLogs = kortixSchema.table(
     // in sync by the writer) into real columns so the dashboard aggregates
     // reading them can scan the covering indexes index-only — a jsonb
     // expression can join an index only as a btree key, and btree expression
-    // keys never serve index-only scans (verified on PG 17.6). Nullable: rows
-    // written before the promotion read NULL and the readers fall back to the
-    // metadata key (see session-model-usage.ts servedModelSql) or to
-    // not-estimated (llm-value.ts), exactly as a missing metadata key reads.
+    // keys never serve index-only scans (verified on PG 17.6). Nullable: the
+    // backfill (20261104060000000) and the insert-time fill trigger
+    // (20261108081025000) lift the metadata keys for every writer version, so
+    // a NULL column means the row never carried the key, and the readers fall
+    // back to the requested/resolved columns (session-model-usage.ts
+    // servedModelSql) or to not-estimated (llm-value.ts) — exactly as a
+    // missing metadata key reads.
     servedModel: text('served_model'),
     usageEstimated: boolean('usage_estimated'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

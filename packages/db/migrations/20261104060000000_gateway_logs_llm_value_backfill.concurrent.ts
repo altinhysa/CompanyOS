@@ -25,11 +25,11 @@
 //
 // Readers keep reading metadata until this pass ran: migrations run before the
 // new pods start, so by the time the column-reading code serves traffic, this
-// pass has healed every row the OLD writer produced. Rows the old writer
-// produces during the deploy window (after the last batch, before the new
-// pods' first write) are the only residual: the statement is idempotent and
-// re-runnable — re-run it once after the deploy settles if exactness matters
-// for that window (a one-line ops step, no lock held between batches).
+// pass has healed every row the OLD writer produced before it. Rows the old
+// writer produces during the deploy window (after the last batch, before the
+// new pods' first write) are healed by the fill trigger in
+// 20261108081025000, which lifts the same keys into the columns at insert for
+// every writer version.
 
 export const shorthands = undefined;
 

@@ -50,11 +50,14 @@ function asJson(value: unknown): Record<string, unknown> | null {
  * btree expression key never serves an index-only scan on PG 17.6). The
  * metadata keys stay (older replicas and the backfill in
  * 20261104060000000 read them). A missing key reads NULL, which the readers
- * treat exactly as the missing metadata key they replaced.
+ * treat exactly as the missing metadata key they replaced. Old writers
+ * during the rollout window are covered by the insert-time fill trigger
+ * (20261108081025000), which lifts the same keys.
  */
 function promotedColumns(metadata: Record<string, unknown> | undefined) {
   return {
-    servedModel: typeof metadata?.servedModel === 'string' ? metadata.servedModel : null,
+    servedModel:
+      typeof metadata?.servedModel === 'string' ? stripNullBytes(metadata.servedModel) : null,
     usageEstimated: metadata?.usageEstimated === true,
   };
 }

@@ -59,10 +59,10 @@ export const shorthands = undefined;
 // path back to index-only. This replacement carries every column the
 // aggregates read as plain INCLUDE columns over the same (project_id,
 // created_at) keys. Built under a temp name (the final name is still held by
-// the old index); 20261104060003000 drops the old index and
-// 20261104060004000 restores the canonical name the drizzle schema contract
-// declares. WITH ISVALID: if you're re-running this file by hand after an
-// INVALID build, drop the invalid index first.
+// the old index); 20261104060003000 and 20261104060004000 drop the old
+// indexes and 20261104060005000 restores the canonical names the drizzle
+// schema contract declares. WITH ISVALID: if you're re-running this file by
+// hand after an INVALID build, drop the invalid index first.
 //
 // The visibility map must be current for an index-only scan; the table is
 // insert-only and autovacuum maintains it.

@@ -90,6 +90,17 @@ describe('buildGatewayTraceRow', () => {
     expect(absent.usageEstimated).toBe(false);
   });
 
+  // A served model id can carry a NUL only through a hostile upstream id: the
+  // column is `text`, Postgres rejects U+0000 with 22021, and the trace write
+  // is best-effort — an unscrubbed NUL drops the trace on every such request.
+  test('strips NUL bytes from the servedModel metadata key when lifting it into the column', () => {
+    const row = buildGatewayTraceRow(
+      baseInput({ metadata: { servedModel: `gpt-6.1${NUL}-sol` } }),
+    );
+    expect(row.servedModel).toBe('gpt-6.1-sol');
+    expect((row.metadata as any).servedModel).toBe('gpt-6.1-sol');
+  });
+
   test('a non-string servedModel value never reaches the column', () => {
     const row = buildGatewayTraceRow(
       baseInput({ metadata: { servedModel: 42, usageEstimated: 'yes' } }),

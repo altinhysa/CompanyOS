@@ -62,8 +62,10 @@ async function request(input: {
     errorCode: input.errorCode ?? null,
     finalCost: String(billed), billingMode: billed > 0 ? 'credits' : 'none',
     // KRTX-4023: mirror the real writer (gateway-trace-row.ts) — the served
-    // model rides in metadata AND its promoted column. The two raw inserts
-    // below (no column) intentionally keep the pre-promotion row shape.
+    // model rides in metadata AND its promoted column. The raw inserts below
+    // (no column) keep the pre-promotion INSERT shape; the fill trigger
+    // (20261108081025000) lifts their metadata keys at insert, and the
+    // rollout-window test asserts exactly that.
     servedModel: typeof input.metadata?.servedModel === 'string' ? input.metadata.servedModel : null,
     metadata: input.metadata ?? {}, createdAt: at(input.at),
   });
@@ -252,6 +254,34 @@ describe('sessionModelUsage', () => {
       { requested_model: 'route-b', served_model: 'served-b', error_code: 'upstream_error' },
     ]);
     expect(JSON.stringify(usage)).not.toContain('SECRET');
+  });
+
+  // KRTX-4023 rework: an ECS rollout replaces pods gradually, so old writers
+  // keep inserting rows after the one-shot backfill ran. Their INSERT predates
+  // the promoted columns — the keys ride in metadata only — and the table is
+  // insert-only, so nothing heals them later. The fill trigger
+  // (20261108081025000) lifts the keys at insert; without it this row reads
+  // the requested model (the column fallback), not the served one.
+  test('a row the old writer inserts during the rollout (metadata keys, no column) names its served model', async () => {
+    await session('rollout');
+    await turn('rollout', 'msg_rollout_1', 0, 30);
+    await db.execute(sql`
+      insert into kortix.gateway_request_logs
+        (request_id, account_id, project_id, session_id, requested_model, resolved_model,
+         provider, status, ok, final_cost, billing_mode, metadata, created_at)
+      values ('rollout-request-' || ${tag}, ${ACCOUNT}::uuid, ${PROJECT}::uuid, ${sid('rollout')},
+              'gpt-5.4', 'gpt-5.4', 'openai', 200, true, 0, 'none',
+              '{"servedModel":"gpt-5.4-2026-01-30"}'::jsonb, ${at(10).toISOString()}::timestamptz)
+    `);
+
+    const usage = await usageOf('rollout');
+    expect(usage.latest).toEqual({
+      served_model: 'gpt-5.4-2026-01-30',
+      fallback_from: null,
+      at: at(10).toISOString(),
+      outcome: 'answered',
+    });
+    expect(usage.turns.msg_rollout_1?.served_models).toEqual(['gpt-5.4-2026-01-30']);
   });
 
   test('a request logged before the serving model was recorded is read from its own columns', async () => {

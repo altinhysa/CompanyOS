@@ -294,18 +294,29 @@ describe('sessionModelUsage', () => {
     await session('rollout-bound');
     await turn('rollout-bound', 'msg_rb_1', 0, 30);
     const served = '🚀'.repeat(300); // 300 code points = 1200 UTF-8 bytes
+    const resolved = '🚀'.repeat(400); // 1600 UTF-8 bytes: the old writer bounded nothing
     await db.execute(sql`
       insert into kortix.gateway_request_logs
         (request_id, account_id, project_id, session_id, requested_model, resolved_model,
          provider, status, ok, final_cost, billing_mode, metadata, created_at)
       values ('rollout-bound-' || ${tag}, ${ACCOUNT}::uuid, ${PROJECT}::uuid, ${sid('rollout-bound')},
-              'gpt-5.4', 'gpt-5.4', 'openai', 200, true, 0, 'none',
+              'gpt-5.4', ${resolved}::text, 'openai', 200, true, 0, 'none',
               jsonb_build_object('servedModel', ${served}::text), ${at(11).toISOString()}::timestamptz)
     `);
 
     const usage = await usageOf('rollout-bound');
     const expected = '🚀'.repeat(63); // 63 × 4B = 252 ≤ 255; the 64th rocket would exceed
     expect(usage.latest?.served_model).toBe(expected);
+    // The trigger bounds the model strings v4's INCLUDE carries for every
+    // writer — resolved_model too (old writers bounded nothing).
+    const rows = await db
+      .select({ requestedModel: gatewayRequestLogs.requestedModel, resolvedModel: gatewayRequestLogs.resolvedModel })
+      .from(gatewayRequestLogs)
+      .where(eq(gatewayRequestLogs.requestId, `rollout-bound-${tag}`));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.requestedModel).toBe('gpt-5.4');
+    expect(Buffer.byteLength(rows[0]?.resolvedModel ?? '', 'utf8')).toBe(252);
+    expect(Array.from(rows[0]?.resolvedModel ?? '')).toHaveLength(63);
   });
 
   test('a request logged before the serving model was recorded is read from its own columns', async () => {

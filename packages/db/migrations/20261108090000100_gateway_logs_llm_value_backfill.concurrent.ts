@@ -58,36 +58,44 @@ export const up = async (pgm) => {
   // ~2.7 KB). A historical row written by the old writer (which bounded
   // nothing) could carry an oversized model string and fail the BUILD with
   // 54000, leaving an INVALID index. Bound history to the same 255 bytes per
-  // string the writer applies: one scaled code-point cut (never
-  // mid-character), then single-code-point drops until within the budget —
-  // every pass's predicate strictly shrinks. Pathological rows only: real
-  // model ids are far shorter than 255 bytes. Must run BEFORE the index
-  // builds (20261108090000300 / 20261108090000400), which it does by order.
+  // string the writer applies. Must run BEFORE the index builds
+  // (20261108090000300 / 20261108090000400), which it does by order.
+  //
+  // The shared byte-bound helper (the trigger in 20261108090000200 reuses
+  // it): walks whole code points against a byte budget — never a
+  // mid-character cut, which would hand an unpaired surrogate to the UTF-8
+  // column — with the scaled estimate done in bigint (CWE-190: an int4
+  // multiply overflows on a huge text value and would permanently block
+  // this migration).
+  await pgm.db.query(`
+    create or replace function kortix.clip_text_bytes(value text, max_bytes int)
+    returns text
+    language plpgsql
+    immutable
+    set search_path = kortix
+    as $fn$
+    declare
+      cut int;
+    begin
+      if value is null or octet_length(value) <= max_bytes then
+        return value;
+      end if;
+      cut := greatest(max_bytes / 4, (max_bytes::bigint * char_length(value) / octet_length(value))::int);
+      value := left(value, cut);
+      while octet_length(value) > max_bytes loop
+        value := left(value, char_length(value) - 1);
+      end loop;
+      return value;
+    end;
+    $fn$;
+  `);
   await loop(`
     update kortix.gateway_request_logs
-       set requested_model = left(requested_model, greatest(63, (255 * char_length(requested_model) / octet_length(requested_model))::int)),
-           resolved_model  = left(resolved_model,  greatest(63, (255 * char_length(resolved_model)  / octet_length(resolved_model))::int))
+       set requested_model = kortix.clip_text_bytes(requested_model, 255),
+           resolved_model  = kortix.clip_text_bytes(resolved_model, 255)
      where log_id in (
        select log_id from kortix.gateway_request_logs
         where octet_length(requested_model) > 255 or octet_length(resolved_model) > 255
-        limit ${BATCH}
-     )
-  `);
-  await loop(`
-    update kortix.gateway_request_logs
-       set requested_model = left(requested_model, char_length(requested_model) - 1)
-     where log_id in (
-       select log_id from kortix.gateway_request_logs
-        where octet_length(requested_model) > 255 and char_length(requested_model) > 0
-        limit ${BATCH}
-     )
-  `);
-  await loop(`
-    update kortix.gateway_request_logs
-       set resolved_model = left(resolved_model, char_length(resolved_model) - 1)
-     where log_id in (
-       select log_id from kortix.gateway_request_logs
-        where octet_length(resolved_model) > 255 and char_length(resolved_model) > 0
         limit ${BATCH}
      )
   `);

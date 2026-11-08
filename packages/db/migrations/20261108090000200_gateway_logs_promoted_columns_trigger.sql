@@ -50,30 +50,21 @@ RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = kortix
 AS $$
-DECLARE
-  raw text;
 BEGIN
-  -- The same 255-byte bound the new writer applies to the promoted model
-  -- strings (the v4 covering index carries served_model as a btree tuple
-  -- member; old writers predate boundMetadata, so their metadata key is
-  -- unbounded). Code-point cut first (scaled from the byte/char ratio, so
-  -- the estimate is within one code point of the budget), then drop whole
-  -- code points until within the budget — never a mid-character cut.
+  -- The same 255-byte bound the writer applies (the v4 covering index
+  -- carries the model strings as btree tuple members; old writers predate
+  -- boundMetadata and bounded nothing, so the trigger bounds all three
+  -- model strings for every writer version — the shared helper from
+  -- 20261108090000100 walks whole code points against the byte budget).
   IF NEW.served_model IS NULL AND NEW.metadata ? 'servedModel' THEN
-    raw := NEW.metadata ->> 'servedModel';
-    IF raw IS NOT NULL THEN
-      IF octet_length(raw) > 255 THEN
-        raw := left(raw, greatest(63, (255 * char_length(raw) / octet_length(raw))::int));
-        WHILE octet_length(raw) > 255 LOOP
-          raw := left(raw, char_length(raw) - 1);
-        END LOOP;
-      END IF;
-      NEW.served_model := raw;
-    END IF;
+    NEW.served_model := kortix.clip_text_bytes(NEW.metadata ->> 'servedModel', 255);
   END IF;
-  IF NEW.usage_estimated IS NULL AND NEW.metadata ->> 'usageEstimated' IS NOT NULL THEN
+  IF NEW.usage_estimated IS NULL AND NEW.metadata ? 'usageEstimated'
+     AND NEW.metadata ->> 'usageEstimated' IS NOT NULL THEN
     NEW.usage_estimated := (NEW.metadata ->> 'usageEstimated') = 'true';
   END IF;
+  NEW.requested_model := kortix.clip_text_bytes(NEW.requested_model, 255);
+  NEW.resolved_model := kortix.clip_text_bytes(NEW.resolved_model, 255);
   RETURN NEW;
 END;
 $$;--> statement-breakpoint

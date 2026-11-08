@@ -369,26 +369,22 @@ suite('gateway_request_logs project aggregates are index-only', () => {
 
   test('the gateway series plans as an index-only scan too (needs latency_ms carried)', async () => {
     const plan = await planOf(SERIES);
-    expect(plan).toContain('Index Only Scan');
-    expect(plan).toContain(INDEX);
+    expect(plan).toContain(`Index Only Scan using ${INDEX}`);
   });
 
   test('the gateway overview plans as an index-only scan (needs the llm-value columns carried — KRTX-4023)', async () => {
     const plan = await planOf(OVERVIEW);
-    expect(plan).toContain('Index Only Scan');
-    expect(plan).toContain(INDEX);
+    expect(plan).toContain(`Index Only Scan using ${INDEX}`);
   });
 
   test('the gateway breakdown plans as an index-only scan (needs the served-model and requested-model columns carried — KRTX-4023)', async () => {
     const plan = await planOf(BREAKDOWN);
-    expect(plan).toContain('Index Only Scan');
-    expect(plan).toContain(INDEX);
+    expect(plan).toContain(`Index Only Scan using ${INDEX}`);
   });
 
   test('the gateway sources aggregate plans index-only over the join too (KRTX-4449: session_id + account_id carried)', async () => {
     const plan = await planOf(SOURCES, [projectId, accountId]);
-    expect(plan).toContain('Index Only Scan');
-    expect(plan).toContain(INDEX);
+    expect(plan).toContain(`Index Only Scan using ${INDEX}`);
   });
 
   test('the index carries exactly the columns the aggregates read', async () => {
@@ -461,17 +457,24 @@ suite('gateway_request_logs project aggregates are index-only', () => {
 
   test('dropping the index flips the plan back to the heap path (the test is not vacuous)', async () => {
     await superuser.query(`drop index if exists kortix.${INDEX}`);
+    // The four single-table shapes must leave the covering-index world
+    // entirely: no index-only node anywhere in the plan (they touch no other
+    // table with a usable index-only path).
     for (const shape of [BUDGETS_PROJECT_AGG, SERIES, OVERVIEW, BREAKDOWN]) {
       const plan = await planOf(shape);
       expect(plan).not.toContain(INDEX);
       expect(plan).not.toContain('Index Only Scan');
     }
+    // The join shapes keep a nested index-only plan over project_sessions
+    // (the CostScope subquery and the attribution join have their own
+    // indexes); the invariant is the wide log table itself: it must heap-scan
+    // once the covering index is gone.
     const sourcesPlan = await planOf(SOURCES, [projectId, accountId]);
     expect(sourcesPlan).not.toContain(INDEX);
-    expect(sourcesPlan).not.toContain('Index Only Scan');
+    expect(sourcesPlan).toContain('Seq Scan on gateway_request_logs');
     const sessionsPlan = await planOf(SESSIONS, [projectId, accountId]);
     expect(sessionsPlan).not.toContain(INDEX);
-    expect(sessionsPlan).not.toContain('Index Only Scan');
+    expect(sessionsPlan).toContain('Seq Scan on gateway_request_logs');
     // Rebuild with the migration's own statement (plain, not CONCURRENTLY --
     // this is a 4k-row test table), so the test also proves the migration's
     // SQL is what creates the index the other tests assert on.
@@ -480,15 +483,12 @@ suite('gateway_request_logs project aggregates are index-only', () => {
     await superuser.query(V4_DEFINITION);
     for (const shape of [BUDGETS_PROJECT_AGG, SERIES, OVERVIEW, BREAKDOWN]) {
       const plan = await planOf(shape);
-      expect(plan).toContain('Index Only Scan');
-      expect(plan).toContain(INDEX);
+      expect(plan).toContain(`Index Only Scan using ${INDEX}`);
     }
     const rebuiltSourcesPlan = await planOf(SOURCES, [projectId, accountId]);
-    expect(rebuiltSourcesPlan).toContain('Index Only Scan');
-    expect(rebuiltSourcesPlan).toContain(INDEX);
+    expect(rebuiltSourcesPlan).toContain(`Index Only Scan using ${INDEX}`);
     const rebuiltSessionsPlan = await planOf(SESSIONS, [projectId, accountId]);
-    expect(rebuiltSessionsPlan).toContain('Index Only Scan');
-    expect(rebuiltSessionsPlan).toContain(INDEX);
+    expect(rebuiltSessionsPlan).toContain(`Index Only Scan using ${INDEX}`);
   });
 
   test('the backfill fills the promoted columns from metadata without changing what the aggregates read (KRTX-4023)', async () => {

@@ -2,8 +2,8 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { accounts, gatewayRequestLogs, projects } from '@kortix/db';
 import { eq, sql } from 'drizzle-orm';
 import { db } from './db';
-import { llmValueFields } from './llm-value';
 import { totalSpendSql } from './llm-spend';
+import { llmValueFields } from './llm-value';
 import { listProjectGatewaySourceSpend } from './session-costs';
 
 const accountId = crypto.randomUUID();

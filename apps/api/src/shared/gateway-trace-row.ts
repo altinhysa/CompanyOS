@@ -34,6 +34,15 @@ function nonNegInt(value: number | undefined) {
   return Number.isFinite(value) && value && value > 0 ? Math.floor(value) : 0;
 }
 
+// The covering indexes (v4's INCLUDE, idx_gateway_logs_model) carry these
+// strings as btree tuple members (max ~2.7 KB): bound to 255 code points so
+// no client-supplied model id can exceed the tuple limit and silently drop
+// the whole trace row (Strix CWE-1284). Array.from, not slice: a slice can
+// split a surrogate pair and the unpaired half would fail the UTF-8 insert.
+const MODEL_MAX_CHARS = 255;
+const clipText = (value: string, chars: number = MODEL_MAX_CHARS) =>
+  Array.from(value).slice(0, chars).join('');
+
 // metadata rode in a btree tuple while a covering index carried it
 // (idx_gateway_logs_project_time_covering v2/v3, KRTX-4022/KRTX-4449: max
 // ~2.7 KB — an oversized value failed the INSERT of the whole trace row).
@@ -93,7 +102,9 @@ function asJson(value: unknown): Record<string, unknown> | null {
 function promotedColumns(metadata: Record<string, unknown> | undefined) {
   return {
     servedModel:
-      typeof metadata?.servedModel === 'string' ? stripNullBytes(metadata.servedModel) : null,
+      typeof metadata?.servedModel === 'string'
+        ? clipText(stripNullBytes(metadata.servedModel))
+        : null,
     usageEstimated: metadata?.usageEstimated === true,
   };
 }
@@ -122,8 +133,8 @@ export function buildGatewayTraceRow(input: GatewayTraceInput) {
     sessionId: input.sessionId || null,
     actorUserId: input.actorUserId || null,
     keyId: input.keyId || null,
-    requestedModel: input.requestedModel,
-    resolvedModel: input.resolvedModel,
+    requestedModel: clipText(input.requestedModel),
+    resolvedModel: clipText(input.resolvedModel),
     provider: input.provider,
     status: input.status,
     ok: input.ok,

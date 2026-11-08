@@ -51,8 +51,10 @@ LANGUAGE plpgsql
 SET search_path = kortix
 AS $$
 BEGIN
+  -- left(..., 255): the same bound the new writer applies to the promoted
+  -- model strings (btree tuple guard; real model ids are far shorter).
   IF NEW.served_model IS NULL THEN
-    NEW.served_model := NEW.metadata ->> 'servedModel';
+    NEW.served_model := left(NEW.metadata ->> 'servedModel', 255);
   END IF;
   IF NEW.usage_estimated IS NULL AND NEW.metadata ->> 'usageEstimated' IS NOT NULL THEN
     NEW.usage_estimated := (NEW.metadata ->> 'usageEstimated') = 'true';

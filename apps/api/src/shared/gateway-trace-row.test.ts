@@ -94,9 +94,7 @@ describe('buildGatewayTraceRow', () => {
   // column is `text`, Postgres rejects U+0000 with 22021, and the trace write
   // is best-effort — an unscrubbed NUL drops the trace on every such request.
   test('strips NUL bytes from the servedModel metadata key when lifting it into the column', () => {
-    const row = buildGatewayTraceRow(
-      baseInput({ metadata: { servedModel: `gpt-6.1${NUL}-sol` } }),
-    );
+    const row = buildGatewayTraceRow(baseInput({ metadata: { servedModel: `gpt-6.1${NUL}-sol` } }));
     expect(row.servedModel).toBe('gpt-6.1-sol');
     expect((row.metadata as any).servedModel).toBe('gpt-6.1-sol');
   });
@@ -109,6 +107,26 @@ describe('buildGatewayTraceRow', () => {
     // The SQL flag is the strict boolean the emit writes; a stray string is
     // not a trusted 'true'.
     expect(row.usageEstimated).toBe(false);
+  });
+
+  // Strix CWE-1284: the covering index's INCLUDE list carries the model
+  // strings as btree tuple members (max ~2.7 KB). A client-supplied model
+  // name of incompressible text must not be able to reject the whole trace
+  // insert (the write is fire-and-forget: a rejection silently drops the
+  // usage/budget row). Bound every model string at the single write site.
+  test('bounds the client-supplied model strings to 255 code points (the covering-index tuple guard)', () => {
+    const huge = 'X'.repeat(10_000);
+    const emojiPad = '🚀'.repeat(300); // 600 UTF-16 units, 300 code points
+    const row = buildGatewayTraceRow(
+      baseInput({
+        requestedModel: huge,
+        resolvedModel: emojiPad,
+        metadata: { servedModel: `a\u0000${huge}` },
+      }),
+    );
+    expect(row.requestedModel).toHaveLength(255);
+    expect(Array.from(row.resolvedModel)).toHaveLength(255); // code points, not UTF-16 units
+    expect(row.servedModel).toBe(`a${'X'.repeat(254)}`); // NUL stripped, then bounded
   });
 });
 

@@ -284,6 +284,28 @@ describe('sessionModelUsage', () => {
     expect(usage.turns.msg_rollout_1?.served_models).toEqual(['gpt-5.4-2026-01-30']);
   });
 
+  // The trigger applies the writer's bound to the lifted key: an old writer's
+  // metadata.servedModel is client/upstream-influenced and unbounded (old
+  // writers predate boundMetadata), and the v4 covering index carries
+  // served_model as a btree tuple member.
+  test('the trigger bounds an oversized old-writer servedModel to 255 code points', async () => {
+    await session('rollout-bound');
+    await turn('rollout-bound', 'msg_rb_1', 0, 30);
+    const served = '🚀'.repeat(300); // 300 code points, 600 UTF-16 units
+    await db.execute(sql`
+      insert into kortix.gateway_request_logs
+        (request_id, account_id, project_id, session_id, requested_model, resolved_model,
+         provider, status, ok, final_cost, billing_mode, metadata, created_at)
+      values ('rollout-bound-' || ${tag}, ${ACCOUNT}::uuid, ${PROJECT}::uuid, ${sid('rollout-bound')},
+              'gpt-5.4', 'gpt-5.4', 'openai', 200, true, 0, 'none',
+              jsonb_build_object('servedModel', ${served}::text), ${at(11).toISOString()}::timestamptz)
+    `);
+
+    const usage = await usageOf('rollout-bound');
+    const expected = '🚀'.repeat(255);
+    expect(usage.latest?.served_model).toBe(expected);
+  });
+
   test('a request logged before the serving model was recorded is read from its own columns', async () => {
     await session('legacy');
     await turn('legacy', 'msg_legacy_1', 0, 30);

@@ -102,7 +102,7 @@ test('insert stores the exact create-time metadata fields and override order', a
   expect(inserted?.metadata).toEqual({
     arbitrary: 7, custom_name: 'Chosen name', source: 'trigger',
     model: 'kortix/deepseek-v4.1-flash', model_source: 'platform',
-    repository_access: false, repository_generation: null, workspace_mode: 'runtime',
+    repository_generation: null,
     sandbox_slug: 'default',
     audit_v2: {
       actor_type: 'human', authoritative_source: 'human',

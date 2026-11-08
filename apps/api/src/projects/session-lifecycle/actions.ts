@@ -14,6 +14,7 @@ import { refreshResumedSandboxRuntimeAssets } from '../lib/sandbox-runtime-refre
 import { allocateSessionRuntime } from '../lib/session-runtime-allocator';
 import {
   projectImageAllowedForSession,
+  repositoryAccessFromSessionMetadata,
   sandboxSlugFromSessionMetadata,
 } from '../lib/session-sandbox-metadata';
 import {
@@ -309,7 +310,7 @@ async function provisionReplacementRuntime(
     providerName,
     baseRef: session.baseRef ?? loaded.row.defaultBranch,
     agentName: session.agentName ?? 'default',
-    allowProjectImage: projectImageAllowedForSession(session.agentName),
+    allowProjectImage: projectImageAllowedForSession(session.agentName, repositoryAccessFromSessionMetadata(session.metadata)),
     sandboxSlug: sandboxSlugFromSessionMetadata(session.metadata),
     runtimeMetadata,
     initialTurn,
@@ -328,6 +329,7 @@ async function provisionReplacementRuntime(
         manifestPath: loaded.row.manifestPath,
         // A restarted My Kortix session must keep its runtime and config.
         platformMetaAgent: isMyKortixAgentName(session.agentName ?? ''),
+        repositoryAccess: repositoryAccessFromSessionMetadata(session.metadata),
       }),
     resolveGitProject: async () => withProjectGitAuth(loaded.row as any),
   });

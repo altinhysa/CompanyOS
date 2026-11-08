@@ -12,8 +12,7 @@ mock.module('../../billing/services/entitlements', () => ({ accountMayUseManaged
 mock.module('../../shared/audit', () => ({ recordAuditEvent: async () => {} }));
 mock.module('../agents', () => ({
   loadProjectAgents: async () => ({ defaultAgent: 'default', builtinAgents: { my_kortix: false } }),
-  repositoryAccessFromLoadedAgents: () => false,
-  legacyReadWorkspaceFromLoadedAgents: () => false,
+  agentGrantAllowsRepository: () => false,
   sandboxFromLoadedAgents: () => null,
 }));
 mock.module('./session-connector-bindings', () => ({
@@ -33,10 +32,6 @@ mock.module('../../shared/db', () => ({
 }));
 mock.module('../../platform/services/session-sandbox', () => ({ provisionSessionSandbox: async () => {} }));
 mock.module('./git', () => ({ withProjectGitAuth: async (project: unknown) => project }));
-mock.module('../../git-proxy/project-snapshot', () => ({
-  resolveProjectSnapshotMode: () => 'git',
-  resolveProjectSnapshotPinForSession: async () => ({ pin: null, descriptor: null }),
-}));
 mock.module('./session-runtime-context', () => ({
   parseSessionRuntimeContext: () => ({ ok: true }),
   mergeSessionSandboxEnv: (env: unknown) => env,
@@ -102,7 +97,7 @@ test('insert stores the exact create-time metadata fields and override order', a
   expect(inserted?.metadata).toEqual({
     arbitrary: 7, custom_name: 'Chosen name', source: 'trigger',
     model: 'kortix/deepseek-v4.1-flash', model_source: 'platform',
-    repository_generation: null,
+    repository_access: false, repository_generation: null, workspace_mode: 'runtime',
     sandbox_slug: 'default',
     audit_v2: {
       actor_type: 'human', authoritative_source: 'human',

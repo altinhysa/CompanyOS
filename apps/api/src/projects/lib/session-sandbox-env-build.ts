@@ -41,7 +41,7 @@ import { resolveSessionSecretGrant } from './secret-grant';
 import { AmbiguousSecretGrantError, intersectSecretGrants, listProjectSecretsSnapshotForUser } from '../secrets';
 import { SECRET_CAPABILITIES_ENV_NAME } from '../secret-capabilities';
 import { piPackageBundleForSession } from '../../pi-packages/bundle';
-import { manifestPiCodemode, manifestPiContext, manifestPiPackages, resolveCompiledAgentConfigForSession } from './compile-agent-config';
+import { manifestPiCodemode, manifestPiContext, manifestPiPackages, resolveCompiledAgentConfigForSession, resolveSelectedAgentConfigForSession } from './compile-agent-config';
 
 
 
@@ -128,6 +128,10 @@ type SessionSandboxEnvInput = {
   manifestPath?: string;
   /** The reserved platform coordinator receives no project secrets. */
   platformMetaAgent?: boolean;
+  /** May this box receive repository bytes (`repository_access` on the session row, decided by
+   *  grants at create)? False: only the session's own agent is compiled, and no release archive
+   *  of the repository tree is signed for it. */
+  repositoryAccess?: boolean;
 };
 
 /** Compile the session's agent config and resolve its secret grant (one manifest read). */
@@ -172,7 +176,10 @@ async function resolveSessionAgentConfig(input: SessionSandboxEnvInput): Promise
     // repo's branches whenever this process had not fetched for 60 s: p50
     // 742 ms, p90 4.7 s on prod for this step (2026-10-30).
     const read = { onManifest, forceRefresh: 'tip-proof' as const };
-    const compiled = resolveCompiledAgentConfigForSession(gitProject, input.baseRef, read);
+    const compiled =
+      !(input.repositoryAccess ?? true)
+        ? resolveSelectedAgentConfigForSession(gitProject, input.agentName, input.baseRef, read)
+        : resolveCompiledAgentConfigForSession(gitProject, input.baseRef, read);
 
     // Per-agent secret scoping: an agent declared in `agents:` with a `secrets`
     // allowlist receives ONLY those IDENTIFIERS — so a narrowly-scoped agent
@@ -396,7 +403,7 @@ export async function buildSessionSandboxEnvVars(input: SessionSandboxEnvInput):
   // A read with a fire-and-forget publish (publish.ts), so it needs nothing above.
   const configReleaseRead = started(
     tl.span('config-release', () =>
-      !input.platformMetaAgent
+      (input.repositoryAccess ?? true) && !input.platformMetaAgent
         ? configReleaseEnvForSession({
             projectId: input.projectId,
             ref: input.baseRef,

@@ -19,6 +19,7 @@ import { type ProjectRow } from '../lib/serializers';
 import { allocateSessionRuntime } from '../lib/session-runtime-allocator';
 import {
   projectImageAllowedForSession,
+  repositoryAccessFromSessionMetadata,
   sandboxSlugFromSessionMetadata,
 } from '../lib/session-sandbox-metadata';
 import { buildSessionSandboxEnvVars, sandboxCallbackUnreachableReason } from '../lib/sessions';
@@ -87,7 +88,10 @@ export async function allocateRuntimeOnOpen(
     providerName,
     baseRef: session.baseRef ?? loaded.row.defaultBranch,
     agentName: session.agentName ?? 'default',
-    allowProjectImage: projectImageAllowedForSession(session.agentName),
+    allowProjectImage: projectImageAllowedForSession(
+      session.agentName,
+      repositoryAccessFromSessionMetadata(session.metadata),
+    ),
     sandboxSlug: sandboxSlugFromSessionMetadata(session.metadata),
     runtimeMetadata,
     sessionMetadata,
@@ -104,6 +108,7 @@ export async function allocateRuntimeOnOpen(
         sessionModel,
         defaultBranch: loaded.row.defaultBranch,
         manifestPath: loaded.row.manifestPath,
+        repositoryAccess: repositoryAccessFromSessionMetadata(session.metadata),
       }),
     resolveGitProject: async () => withProjectGitAuth(loaded.row),
   });

@@ -49,6 +49,7 @@ import {
   projectRequiresDeclaredAgents,
   resolveGovernedAgentGrant,
   sandboxFromLoadedAgents,
+  agentGrantAllowsRepository,
 } from '../agents';
 import { convertPendingPromptToInboxRow } from '../session-lifecycle/pending-prompt';
 
@@ -57,7 +58,6 @@ import { listResolvedProjectSecrets, parseSessionSecretsAllowlist, secretKeyColl
 
 import { withProjectGitAuth } from './git';
 import { repositoryGeneration } from './repository-generation';
-import { resolveFastBootGitHintWithCache } from './fast-boot-git-hint';
 import { resolveSessionProvider, sessionProviderIsLocked } from './provider-precedence';
 import {
   DEPRECATED_PROVIDER_CODE,
@@ -100,13 +100,13 @@ import { FIRST_PROMPT_MAX_CHARS, SPACE_NOT_FOUND, ensureDefaultSpace, findForkSo
 import { liveTriggerSpace, triggerRunSpace } from './trigger-space';
 
 import {
-  resolveProjectSnapshotMode,
-  resolveProjectSnapshotPinForSession,
 } from '../../git-proxy/project-snapshot';
 
 import { buildSessionSandboxEnvVars } from './session-sandbox-env-build';
 import { sandboxCallbackUnreachableReason, sandboxCallbackDeadTunnelReason } from './session-callback-probe';
-import type { Actor } from '../../iam/actor';
+import { actorForUser, type Actor } from '../../iam/actor';
+import { PROJECT_ACTIONS } from '../../iam/actions';
+import { authorize } from '../../iam/authorize';
 import { loadVisibleSession, sessionIsTombstoned } from './session-visibility';
 import { HUMAN_SESSION_SURFACES } from './session-surface';
 import { isWorkflowRunnerContext, sessionIsWorkflowRunner } from './workflow-runner';
@@ -540,6 +540,7 @@ async function resolveSessionAgent(params: {
     projectDefaultAgent: string | null;
     agentName: string;
     platformMetaAgent: boolean;
+    repositoryAccess: boolean;
   }>
 > {
   const { input, projectId } = params;
@@ -687,7 +688,19 @@ async function resolveSessionAgent(params: {
       },
     };
   }
-  return { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent };
+  // Whether this session's box may receive repository bytes (the full config
+  // release, every agent's compiled config, the project image) and use the
+  // repository routes. Decided by grants, never by kortix.yaml: the agent's
+  // grant must allow `project.gitops.read` and the launching person must hold
+  // `project.file.read`. A service account is governed by its own grant alone.
+  const repositoryAccess =
+    agentGrantAllowsRepository(agentName, loadedAgents) &&
+    (input.requestingPrincipalType === 'service_account' ||
+      (await authorize(actorForUser(input.userId, project.accountId), PROJECT_ACTIONS.PROJECT_FILE_READ, {
+        type: 'project',
+        id: projectId,
+      })).allowed);
+  return { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent, repositoryAccess };
 }
 
 /**
@@ -1165,6 +1178,7 @@ function buildSessionCreateMetadata(params: {
   sessionModel: string | null;
   sessionModelSource: ModelSource | null;
   parentSession: ParentSession;
+  repositoryAccess: boolean;
   sandboxSlug: string;
   /** Filed into a space: the first prompt is stored for the channel timeline. */
   filed: boolean;
@@ -1187,6 +1201,7 @@ function buildSessionCreateMetadata(params: {
     sessionModel,
     sessionModelSource,
     parentSession,
+    repositoryAccess,
     sandboxSlug,
     filed,
     workspaceVolume,
@@ -1280,7 +1295,10 @@ function buildSessionCreateMetadata(params: {
     // tight grace so finished workers don't idle at full compute.
     ...(input.callerSessionId ? { spawned_by_session: input.callerSessionId } : {}),
     ...(sessionSource && sessionSource !== invocationSource ? { source: sessionSource } : {}),
+    repository_access: repositoryAccess,
     repository_generation: repositoryGeneration(project.metadata as Record<string, unknown>),
+    // Rollback compatibility: older API replicas must also enforce this restriction.
+    workspace_mode: repositoryAccess ? 'branch' : 'runtime',
     sandbox_slug: sandboxSlug,
     // The session's /workspace volume: every box of the session mounts it (platform/services/workspace-volume.ts).
     ...(workspaceVolume ? { [WORKSPACE_VOLUME_SESSION_KEY]: workspaceVolume } : {}),
@@ -1490,6 +1508,7 @@ async function provisionCreatedSession(params: {
   agentName: string;
   sessionModel: string | null;
   platformMetaAgent: boolean;
+  repositoryAccess: boolean;
   providerName: SandboxProviderName;
   providerLocked: boolean;
   initialTurn: ReturnType<typeof prepareInitialSandboxTurn> | null;
@@ -1504,6 +1523,7 @@ async function provisionCreatedSession(params: {
     agentName,
     sessionModel,
     platformMetaAgent,
+    repositoryAccess,
     providerName,
     providerLocked,
     initialTurn,
@@ -1531,6 +1551,7 @@ async function provisionCreatedSession(params: {
       platformMetaAgent,
       defaultBranch: project.defaultBranch,
       manifestPath: project.manifestPath,
+      repositoryAccess,
     })
       .then((envVars) => {
         tl.mark('env-vars');
@@ -1565,7 +1586,7 @@ async function provisionCreatedSession(params: {
       projectId,
       userId,
       agentName,
-      allowProjectImage: projectImageAllowedForSession(agentName),
+      allowProjectImage: projectImageAllowedForSession(agentName, repositoryAccess),
       provider: providerName,
       providerLocked,
       metadata: {
@@ -1758,7 +1779,7 @@ export async function createProjectSession(input: {
       : [];
   const agent = await resolveSessionAgent({ input, projectId, channelAgents });
   if (agent.error) return { error: agent.error };
-  const { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent } = agent;
+  const { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent, repositoryAccess } = agent;
 
   const model = await resolveSessionModel({
     input,
@@ -1874,6 +1895,7 @@ export async function createProjectSession(input: {
     sessionModel,
     sessionModelSource,
     parentSession,
+    repositoryAccess,
     sandboxSlug,
     filed: requestedSpace.filed,
     // Only a Platinum session box mounts it. An unrecorded open is deleted.
@@ -2024,6 +2046,7 @@ export async function createProjectSession(input: {
     agentName,
     sessionModel,
     platformMetaAgent,
+    repositoryAccess,
     providerName,
     providerLocked,
     initialTurn,

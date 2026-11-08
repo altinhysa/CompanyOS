@@ -39,6 +39,7 @@ export {
   projectRequiresDeclaredAgents,
   resolveAgentGrant,
   resolveGovernedAgentGrant,
+  agentGrantAllowsRepository,
   sandboxFromLoadedAgents,
   type AgentNotDeclaredError,
   type GovernedAgentGrantResult,

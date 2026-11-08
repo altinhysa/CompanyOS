@@ -1,6 +1,7 @@
 import type { AgentGrant } from '@kortix/db';
 import { isMyKortixAgentName } from '@kortix/shared';
-import { canonicalizeGrantActions, canonicalizeGrantConnectors } from '../../iam/agent-scope';
+import { PROJECT_ACTIONS } from '../../iam/actions';
+import { agentMayPerform, canonicalizeGrantActions, canonicalizeGrantConnectors } from '../../iam/agent-scope';
 import type { GitBackedProject } from '../git';
 import { disabledMyKortixAgentGrant, myKortixAgentGrant } from '../lib/my-kortix-agent';
 import { RUNTIME_BUILTIN_AGENTS } from '@kortix/manifest-schema';
@@ -223,6 +224,18 @@ export function grantFromLoadedAgents(agentName: string, loaded: LoadedAgents): 
   // everything, including secrets/env (an unlisted agent receives no project
   // secrets).
   return { agent: agentName, permissions: [], connectors: [], env: [] };
+}
+
+/**
+ * Does the agent's own grant (the one its session token is minted with) allow
+ * repository reads? A session never checks out the repository at boot
+ * (2026-11-08); this decides whether its box may receive repository bytes at
+ * all: the full config release, every agent's compiled config, the project's
+ * template image, and the repository routes. Session create ANDs it with the
+ * launching person's `project.file.read`.
+ */
+export function agentGrantAllowsRepository(agentName: string, loaded: LoadedAgents): boolean {
+  return agentMayPerform(canonicalizeGrantActions(grantFromLoadedAgents(agentName, loaded)), PROJECT_ACTIONS.PROJECT_GITOPS_READ);
 }
 
 /** Resolve the selected agent's sandbox template without repository I/O. */

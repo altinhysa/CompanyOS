@@ -411,6 +411,16 @@ async function cmdCreate(a: Args) {
   }
 
   const root = repoRoot();
+  // An absolute core.hooksPath makes every worktree run the primary
+  // checkout's hooks, from whatever branch the primary has checked out.
+  // 2026-11-08: the primary's stale pre-commit ran `dotenvx protect` from a
+  // worktree and pointed the global git filter at that worktree. `.githooks`
+  // is what `pnpm install` sets (package.json `prepare`).
+  const hooksPath = sh(['git', '-C', root, 'config', '--get', 'core.hooksPath']).stdout.trim();
+  if (hooksPath && isAbsolute(hooksPath)) {
+    sh(['git', '-C', root, 'config', 'core.hooksPath', '.githooks']);
+    sub(`core.hooksPath was ${hooksPath}; set it to .githooks so each worktree runs its own hooks`);
+  }
   const wtPath = defaultWorktreePath(root, name);
   const branch = (typeof a.flags.branch === 'string' && a.flags.branch) || name;
   // `dev` (the default) resolves to a freshly fetched origin/dev, never the
@@ -835,7 +845,13 @@ async function nukeOne(name: string, e: SlotEntry, flags: Record<string, string 
   if (e.branch) {
     const del = sh(['git', '-C', root, 'branch', '-d', e.branch]);
     if (del.ok) sub(`deleted branch "${e.branch}"`);
-    else if (flags.force) { sh(['git', '-C', root, 'branch', '-D', e.branch]); sub(`force-deleted branch "${e.branch}" (had unmerged commits)`); }
+    // --force drops a branch only when every commit on it also exists on a remote.
+    // A branch with unpushed commits is the only copy of that work: 2026-11-05 a
+    // `nuke --force` deleted a 60-commit branch that had never been pushed.
+    else if (flags.force && sh(['git', '-C', root, 'rev-list', '--count', e.branch, '--not', '--remotes']).stdout.trim() === '0') {
+      sh(['git', '-C', root, 'branch', '-D', e.branch]); sub(`force-deleted branch "${e.branch}" (had unmerged commits, all pushed)`);
+    }
+    else if (flags.force) sub(`kept branch "${e.branch}": it has commits on no remote. Push it, or run \`git branch -D ${e.branch}\` to drop them`);
     else sub(`kept branch "${e.branch}" (unmerged commits) — \`git branch -D ${e.branch}\` or \`nuke --force\` to drop it`);
   }
   try { rmSync(slotDir(name), { recursive: true, force: true }); } catch {}

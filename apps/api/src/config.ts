@@ -268,6 +268,17 @@ const envSchema = z.object({
   // deletes nothing; `execute` runs the deletion routine; `off` stops the tick.
   // ACCOUNT_DELETION_SWEEP_PAUSED forces dry_run.
   RETENTION_ERASURE_MODE: z.enum(['off', 'dry_run', 'execute']).optional().default('dry_run'),
+  // The workspace split (workspaces/split/): splits each project of a legacy
+  // multi-project account into its own workspace. `off` stops the tick,
+  // `dry_run` writes the plan into kortix.workspace_split_runs and moves
+  // nothing, `apply` moves one project per transaction. Unset: `dry_run` on a
+  // cloud deployment (INTERNAL_KORTIX_ENV set explicitly), `off` locally and on
+  // self-host. A `workspace_split` row in kortix.platform_settings
+  // (`{"mode": "..."}`) overrides it at runtime.
+  WORKSPACE_SPLIT_MODE: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim().toLowerCase().replace('-', '_') : value),
+    z.enum(['off', 'dry_run', 'apply']).optional(),
+  ),
   RETENTION_ERASURE_AFTER_DAYS: optInt(80).refine((days) => days >= 0, {
     message: 'Must be 0 or more days: the retention backstop never erases an account before its date',
   }),
@@ -360,6 +371,15 @@ const envSchema = z.object({
   // How long `PUT …/log/blobs/<sha256>` waits for its body (P2.13): a body not read by then is
   // cancelled with 408 and its upload slot freed. Under the route's 95 s request deadline.
   SESSION_LOG_BLOB_READ_MS: optInt(60_000),
+  // The largest page `GET …/log` reads from Postgres, in bytes of stored record size
+  // (`pg_column_size`, a lower bound of the JSON's wire length). The route serves the window's
+  // newest messages whole and stops the window at the first one that would overflow it; the
+  // first message is served however large it is. First cause (KRTX-4508, prod 2026-11-08): a heavy
+  // session's 500-record page carried 100+ MB — every page read cost 1–5 s (`db;dur` was 96 %
+  // of it), and the fleet's session-log pollers pushed the route's p95 to 1074–2240 ms while
+  // ordinary sessions stayed at 40 ms. 2 MiB bounds the page read at ~100–300 ms on the prod
+  // link and keeps a normal page (40 recent turn messages, ≤ ~1 MB) whole.
+  SESSION_LOG_PAGE_MAX_BYTES: optInt(2 * 1024 * 1024),
   // Operator switch for the retention purge of session content (P2.8, decision D6): session
   // rows 30 days after a delete, 80 days after a subscription end (inert until decision D6b), their files 7 days later.
   // On by default. Off stops the worker's tick; nothing it has not yet purged is touched.
@@ -414,10 +434,11 @@ const envSchema = z.object({
   // shared/platform-roles.ts's isPlatformAdmin). Deliberately narrower than
   // the removed KORTIX_SINGLE_ACCOUNT_MODE: signups still work, teams/orgs
   // still fully function, SSO/JIT still lands users in their org — only the
-  // CREATION of new accounts by ordinary users is gated. The personal-account
-  // bootstrap path (bootstrapPersonalAccount, called directly from GET
-  // /v1/accounts on first login) does NOT route through this gate — every
-  // user still gets their own landing account. Off by default (cloud is
+  // CREATION of new accounts by ordinary users is gated: POST /v1/accounts and
+  // a new workspace (`new_workspace: true` on POST /v1/projects/provision)
+  // that would need a new account answer 403 `account_creation_restricted`.
+  // No account is created at sign-up (Workspaces D3), so on such a
+  // deployment a new user joins through an invite. Off by default (cloud is
   // unaffected); the self-host CLI defaults this to 'true'
   // (SHARED_FEATURE_FLAG_DEFAULTS) since a VPS operator usually wants to be
   // the only one who can spin up new organizations. The frontend mirrors this
@@ -1153,6 +1174,26 @@ function validateEnv(): z.infer<typeof envSchema> {
     }
   }
 
+  // ── Values dotenvx did not decrypt ─────────────────────────────────────
+  // With no private key, dotenvx leaves `encrypted:…` in place and still exits
+  // 0. The schema then fails with an unrelated-looking message ("Must be a
+  // valid HTTP(S) URL"), so name the real cause. A warning only: it never
+  // decides whether the server starts.
+  const stillEncrypted = Object.keys(process.env)
+    .filter((name) => process.env[name]?.startsWith('encrypted:'))
+    .sort();
+  if (stillEncrypted.length > 0) {
+    const shown = stillEncrypted.slice(0, 3).join(', ');
+    const more = stillEncrypted.length > 3 ? ` and ${stillEncrypted.length - 3} more` : '';
+    issues.push({
+      var: 'dotenvx',
+      message:
+        `${stillEncrypted.length} value(s) are still encrypted (${shown}${more}): no dotenvx private key was found. ` +
+        'Run `dotenvx armor login` (dotenvx 2.7.1 or newer), or set DOTENV_PRIVATE_KEY, or restore apps/api/.env.keys.',
+      level: 'warn',
+    });
+  }
+
   // Use raw values for conditional checks (schema may have failed)
   const raw = result.success ? result.data : (process.env as Record<string, string | undefined>);
 
@@ -1364,7 +1405,11 @@ function validateEnv(): z.infer<typeof envSchema> {
     }
     console.error('\x1b[31m' + '='.repeat(70) + '\x1b[0m');
     console.error('');
-    console.error('\x1b[31m  Fix the above in your .env file and restart.\x1b[0m');
+    console.error(
+      stillEncrypted.length > 0
+        ? '\x1b[31m  Values were never decrypted: fix the dotenvx warning above first, then restart.\x1b[0m'
+        : '\x1b[31m  Fix the above in your .env file and restart.\x1b[0m',
+    );
     console.error('');
     process.exit(1);
   }
@@ -1431,6 +1476,8 @@ export const config = {
   ACCOUNT_DELETION_SWEEP_PAUSED: env.ACCOUNT_DELETION_SWEEP_PAUSED,
   RETENTION_ERASURE_MODE: env.RETENTION_ERASURE_MODE,
   RETENTION_ERASURE_AFTER_DAYS: env.RETENTION_ERASURE_AFTER_DAYS,
+  WORKSPACE_SPLIT_MODE: (env.WORKSPACE_SPLIT_MODE
+    ?? (process.env.INTERNAL_KORTIX_ENV ? 'dry_run' : 'off')) as 'off' | 'dry_run' | 'apply',
   KORTIX_SANDBOX_EGRESS_PIN_ENFORCED: env.KORTIX_SANDBOX_EGRESS_PIN_ENFORCED,
   KORTIX_CONNECTOR_EGRESS_ALLOW_HOSTS: env.KORTIX_CONNECTOR_EGRESS_ALLOW_HOSTS.split(',')
     .map((host) => host.trim())
@@ -1449,6 +1496,7 @@ export const config = {
   SESSION_LOG_RESTORE_MAX_BYTES: env.SESSION_LOG_RESTORE_MAX_BYTES,
   SESSION_LOG_BLOB_READ_MS: env.SESSION_LOG_BLOB_READ_MS,
   SESSION_LOG_PURGE_ENABLED: env.SESSION_LOG_PURGE_ENABLED,
+  SESSION_LOG_PAGE_MAX_BYTES: env.SESSION_LOG_PAGE_MAX_BYTES,
   OPENAPI_PUBLIC_DOCS: env.OPENAPI_PUBLIC_DOCS,
   MOBILE_MIN_VERSION: env.MOBILE_MIN_VERSION.trim(),
   CLI_MIN_VERSION: env.CLI_MIN_VERSION.trim(),

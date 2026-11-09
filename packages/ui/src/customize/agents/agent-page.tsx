@@ -4,7 +4,7 @@ import { MY_KORTIX_AGENT_NAME } from '@kortix/shared';
 import { adminPath } from '../../lib/routes';
 
 /**
- * /projects/[id]/customize/agents/[name]: one agent, as a page with a rail.
+ * /workspaces/[id]/admin/agents/[name]: one agent, as a page with a rail, in the Workspace settings pane.
  *
  * Customize is agent-first. My Kortix is the one agent a person talks to; every
  * other agent is a work product with only the access its work needs. So the
@@ -80,7 +80,7 @@ import {
 import { EmptyState } from '../../primitives/empty-state';
 import { ErrorState } from '../../primitives/error-state';
 import Hint from '../../primitives/hint';
-import { InfoBanner } from '../../primitives/info-banner';
+import { Alert as BannerAlert, AlertTitle as BannerAlertTitle, AlertDescription as BannerAlertDescription, AlertMedia as BannerAlertMedia } from '../../primitives/alert';
 import { errorToast, successToast } from '../../primitives/toast';
 import { UiLink as Link, useUiPathname, useUiRouter, useUiSearchParams } from '../../providers/ui-provider';
 import { configEntitySourcePath } from '../sections/component/config-entity-source-path';
@@ -123,7 +123,6 @@ import {
 } from './agent-page-chrome';
 import { AgentModelView } from './agent-model-view';
 import { AgentApprovalRules } from './agent-approval-rules';
-import { AgentPinButton } from './agent-pin-button';
 import { AgentShareControl } from './agent-share-control';
 import {
   ACCESS_VIEWS,
@@ -608,7 +607,6 @@ function AgentActions({
 
   return (
     <>
-      <AgentPinButton projectId={projectId} agent={agent.name} />
       <AgentShareControl projectId={projectId} agentName={agent.name} open={share.open} onOpenChange={share.setOpen} />
       {/* A call starts its own session on this agent, so it is offered where Start session is. */}
       {startBlocked ? null : <AgentCallButton projectId={projectId} agentName={agent.name} />}
@@ -1065,9 +1063,9 @@ function ReadOnlyAgentPage({
   // A reader has a page for Kortix permissions and Model only. Every other
   // Access row shows its grant by name on the Overview and links nowhere.
   const banner = (
-    <InfoBanner tone="neutral" icon={LockSimpleIcon} title={t('readOnlyTitle')}>
+    <BannerAlert variant="default" ><BannerAlertMedia><LockSimpleIcon /></BannerAlertMedia><BannerAlertTitle>{t('readOnlyTitle')}</BannerAlertTitle><BannerAlertDescription>
       {t.rich('readOnlyBody', { code: (chunks) => <span className="font-mono">{chunks}</span> })}
-    </InfoBanner>
+    </BannerAlertDescription></BannerAlert>
   );
 
   const body = (() => {

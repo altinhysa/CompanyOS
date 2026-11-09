@@ -4,6 +4,7 @@ import {
   Res,
   TransientCircuitBreaker,
   describeEdgeResponse,
+  isKe2eAppTransientError,
   isKe2eRetryableError,
   readBreakerOptions,
   transientBreaker,
@@ -244,6 +245,40 @@ describe('app transient git_mirror_unavailable', () => {
     }
 
     expect(isKe2eRetryableError(error)).toBe(true);
+  });
+
+  it('marks the typed 503 app-transient — the one app response a POST may be re-sent against', () => {
+    let error: unknown;
+    try {
+      appTransient503().status(201);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isKe2eAppTransientError(error)).toBe(true);
+  });
+
+  it('marks an edge-laundered 5xx retryable but NOT app-transient: a committed POST must not be re-sent', () => {
+    const laundered = new Res({
+      routeTemplate: 'POST /v1/projects/:projectId/sessions',
+      req: { method: 'POST', url: 'https://example.test/v1/projects/p/sessions', headers: {} },
+      res: {
+        status: 503,
+        headers: { 'x-maintenance-mode': 'blocking', 'content-type': 'text/html' },
+        bodyText: '<html>503</html>',
+      },
+      ms: 1,
+    });
+
+    let error: unknown;
+    try {
+      laundered.status(201);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isKe2eRetryableError(error)).toBe(true);
+    expect(isKe2eAppTransientError(error)).toBe(false);
   });
 
   it('keeps asserting a plain application 503 without the typed code', () => {

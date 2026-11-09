@@ -26,6 +26,7 @@ import { formatFlowProgress, redactSensitiveLogText } from "./progress";
 import { partitionParallelFlows, runScheduled, type ConcurrentLane } from "./lanes";
 import { planLocalFlows } from "./local-profile";
 import { isKe2eRetryableError, ke2eRetryDelayMs } from "./client";
+import { createSandboxWarmupSession } from "./client";
 import {
   summarize,
   type Assertion,
@@ -315,29 +316,9 @@ export async function runSuite(opts: RunOptions): Promise<RunResult> {
         const fixtures = world.makeFixtures(stack);
         const project = await fixtures.sharedSeededProject();
         const client = new Client(env.apiUrl).as(world.principals.OWNER);
-        // The create is retried on a marked transient: the API answers a
-        // managed repo cloned within seconds of its provision with its typed
-        // `git_mirror_unavailable` 503 + Retry-After (the credential-propagation
-        // blip that killed release run 42666114535). The stable Idempotency-Key
-        // makes a replay adopt the same create, never a second session.
-        const sessionId = await waitFor(async () => {
-          const created = await client.post('/v1/projects/:projectId/sessions', {}, {
-            params: { projectId: project.id },
-            headers: { 'Idempotency-Key': `ke2e-warmup-${opts.runId}` },
-          });
-          created.status(201);
-          const id = created.json<{ session_id: string }>().session_id;
-          // Not retryable: a 201 without a session_id is a contract violation.
-          if (!id) throw new Error('sandbox setup returned no session_id');
-          return id;
-        }, {
-          until: (id) => !!id,
-          timeoutMs: 300_000,
-          intervalMs: 5000,
-          retryOnError: isKe2eRetryableError,
-          description: 'sandbox warmup session create',
-        });
-        if (!sessionId) throw new Error('sandbox setup returned no session_id');
+        // The create re-sends only on the API's typed, no-write
+        // `git_mirror_unavailable` 503 — see createSandboxWarmupSession.
+        const sessionId = await createSandboxWarmupSession(client, project.id);
         stack.push('session', sessionId, { projectId: project.id });
         // TWO SEQUENTIAL PHASES, TWO INDEPENDENT BUDGETS.
         //

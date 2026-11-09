@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   Client,
   Res,
+  createSandboxWarmupSession,
   isKe2eRetryableError,
   isKe2eTransientGatewayResponse,
   ke2eRetryDelayMs,
@@ -373,5 +374,78 @@ describe('release gate transient failure resilience', () => {
 
     await expect(settleTimers(result)).resolves.toMatchObject({ statusCode: 409 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // The warmup session create: the API answers a managed repo cloned within
+  // seconds of its provision with its typed, no-write
+  // `git_mirror_unavailable` 503 (release run 42666114535), so the create is
+  // re-sent on THAT response and only on it — and without an Idempotency-Key,
+  // whose keyed contract (a requeued command row answered by a 202 or the
+  // row's stored error) the harness can neither mark nor adopt.
+  describe('deployed smoke warmup session create', () => {
+    const transientBody = {
+      error: true,
+      code: 'git_mirror_unavailable',
+      message: 'git mirror is temporarily unavailable',
+      status: 503,
+    };
+
+    function createResponse(
+      status: number,
+      body: unknown,
+      headers: Record<string, string> = {},
+    ): Res {
+      return new Res({
+        routeTemplate: 'POST /v1/projects/:projectId/sessions',
+        req: { method: 'POST', url: 'https://api.test/v1/projects/p/sessions', headers: {} },
+        res: { status, headers, bodyText: JSON.stringify(body), json: body },
+        ms: 1,
+      });
+    }
+
+    it('recovers 503 -> retry -> 201 on the typed no-write 503', async () => {
+      vi.useFakeTimers();
+      const post = vi
+        .fn()
+        .mockResolvedValueOnce(
+          createResponse(503, transientBody, { 'retry-after': '10', 'x-request-id': 'req-1' }),
+        )
+        .mockResolvedValueOnce(createResponse(201, { session_id: 'session-1' }));
+
+      await expect(
+        settleTimers(createSandboxWarmupSession(clientWithPost(post), 'project-1')),
+      ).resolves.toBe('session-1');
+      expect(post).toHaveBeenCalledTimes(2);
+      // No Idempotency-Key: a keyed create would be owned by the session-lifecycle.
+      for (const call of post.mock.calls) {
+        expect((call[2] ?? ({} as Record<string, unknown>)).headers).toBeUndefined();
+      }
+    });
+
+    it('fails fast on a plain application 503 — a POST is never re-sent on a contract failure', async () => {
+      const post = vi
+        .fn()
+        .mockResolvedValue(
+          createResponse(503, { error: 'clone failed', status: 503 }, { 'x-request-id': 'req-1' }),
+        );
+
+      await expect(createSandboxWarmupSession(clientWithPost(post), 'project-2')).rejects.toThrow(
+        /status in \[201\]/,
+      );
+      expect(post).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails fast on an edge-laundered 503 — a committed POST must not be re-sent', async () => {
+      const post = vi
+        .fn()
+        .mockResolvedValue(
+          createResponse(503, '<html>Bad gateway</html>', { 'content-type': 'text/html' }),
+        );
+
+      await expect(createSandboxWarmupSession(clientWithPost(post), 'project-3')).rejects.toThrow(
+        /transient gateway status/,
+      );
+      expect(post).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -9,6 +9,7 @@
 import { currentRecorder } from './context';
 import { assert, BodyAssert } from './expect';
 import { log } from './log';
+import { waitFor } from './poll';
 import type { Captured } from './result';
 
 export type Auth =
@@ -27,6 +28,19 @@ export interface Identity {
 
 export const ANON: Identity = { label: 'ANON', auth: { mode: 'none' } };
 
+/** An error whose ke2e retry markers were set by `throwKe2eRetryable` — typed
+ *  here so neither the raiser nor the readers below need an `any` cast. */
+export type Ke2eRetryableError = Error & {
+  ke2eRetryable: boolean;
+  /** The host's Retry-After, in ms; `ke2eRetryAfterMs` honors it. */
+  ke2eRetryAfterMs?: number;
+  /** Set ONLY on the API's own typed no-write degrade (`git_mirror_unavailable`
+   *  503): the one app response a POST may be re-sent against, because the API
+   *  answers it with nothing committed. Edge-laundered 5xx stay unmarked —
+   *  a create may have committed there, so re-sending can mint a duplicate. */
+  ke2eAppTransient?: boolean;
+};
+
 /** True when the HTTP client marked an error as a transient network failure. */
 export function isKe2eRetryableError(error: unknown): boolean {
   return (
@@ -35,6 +49,27 @@ export function isKe2eRetryableError(error: unknown): boolean {
     'ke2eRetryable' in error &&
     (error as { ke2eRetryable?: unknown }).ke2eRetryable === true
   );
+}
+
+/** True when the error was raised by the API's OWN typed, no-write degrade. */
+export function isKe2eAppTransientError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === 'object' &&
+    (error as { ke2eAppTransient?: unknown }).ke2eAppTransient === true
+  );
+}
+
+/** Throw `message` as `Ke2eRetryableError` with its retry markers set. */
+function throwKe2eRetryable(
+  message: string,
+  opts: { retryable: boolean; afterMs?: number; appTransient?: boolean },
+): never {
+  const error = new Error(message) as Ke2eRetryableError;
+  error.ke2eRetryable = opts.retryable;
+  error.ke2eRetryAfterMs = opts.afterMs;
+  if (opts.appTransient) error.ke2eAppTransient = true;
+  throw error;
 }
 
 const DEFAULT_RETRY_DELAY_MS = 2_000;
@@ -149,27 +184,28 @@ export class Res {
   /** Assert the status code (exact or set membership). */
   status(code: number | number[]): this {
     const codes = Array.isArray(code) ? code : [code];
-    if (!codes.includes(this.statusCode) && isKe2eTransientGatewayResponse(this)) {
+    if (!codes.includes(this.statusCode)) {
       const breakerOpen = transientBreaker.isOpen();
-      const error = new Error(
-        `transient gateway status ${this.statusCode}; expected [${codes.join(', ')}] ` +
-          `${describeEdgeResponse(this.statusCode, this.captured.res.headers)}` +
-          (breakerOpen ? ` — ${transientBreaker.describe()}` : ''),
-      );
-      // With the breaker open the flow-level budget must not re-amplify this.
-      (error as any).ke2eRetryable = !breakerOpen;
-      (error as any).ke2eRetryAfterMs = retryAfterMs(this.header('retry-after'));
-      throw error;
-    }
-    if (!codes.includes(this.statusCode) && isKe2eAppTransientResponse(this)) {
-      const breakerOpen = transientBreaker.isOpen();
-      const error = new Error(
-        `app ${GIT_MIRROR_UNAVAILABLE}; expected [${codes.join(', ')}] — transient status ${this.statusCode}` +
-          (breakerOpen ? ` — ${transientBreaker.describe()}` : ''),
-      );
-      (error as any).ke2eRetryable = !breakerOpen;
-      (error as any).ke2eRetryAfterMs = retryAfterMs(this.header('retry-after'));
-      throw error;
+      if (isKe2eTransientGatewayResponse(this)) {
+        // With the breaker open the flow-level budget must not re-amplify this.
+        throwKe2eRetryable(
+          `transient gateway status ${this.statusCode}; expected [${codes.join(', ')}] ` +
+            describeEdgeResponse(this.statusCode, this.captured.res.headers) +
+            (breakerOpen ? ` — ${transientBreaker.describe()}` : ''),
+          { retryable: !breakerOpen, afterMs: retryAfterMs(this.header('retry-after')) },
+        );
+      }
+      if (isKe2eAppTransientResponse(this)) {
+        throwKe2eRetryable(
+          `app ${GIT_MIRROR_UNAVAILABLE}; expected [${codes.join(', ')}] — transient status ${this.statusCode}` +
+            (breakerOpen ? ` — ${transientBreaker.describe()}` : ''),
+          {
+            retryable: !breakerOpen,
+            afterMs: retryAfterMs(this.header('retry-after')),
+            appTransient: true,
+          },
+        );
+      }
     }
     assert({
       kind: 'status',
@@ -241,9 +277,11 @@ const GIT_MIRROR_UNAVAILABLE = 'git_mirror_unavailable';
  * a moment — most often a managed repo provisioned seconds earlier whose
  * clone credential has not propagated yet, the exact class
  * `isTransientGitMirrorError` documents as expected-and-retryable (incident
- * `incident-20260923T100537Z-hbcr`). The origin did not commit a write (a
- * failed session create finalizes its command as failed — no session row), so
- * the flow-level budget may re-run against fresh fixtures without a
+ * `incident-20260923T100537Z-hbcr`). On the create route the mirror read throws
+ * before the session row is written — the request carries no Idempotency-Key,
+ * so the session-lifecycle never owns the command and there is nothing to
+ * dedupe or dead-letter — and the global onError answers the typed 503 with
+ * nothing committed, so a flow may re-run or re-send the request without a
  * duplicate-write risk. Unlike the edge-laundered 5xx, `x-request-id` proves
  * nothing bad here: the header rides the API's own retryable 503.
  */
@@ -302,14 +340,12 @@ export function isReplaySafeMethod(method: string): boolean {
 export function throwIfEdgeLaundered(response: Res, what: string): void {
   if (!isKe2eTransientGatewayResponse(response)) return;
   const breakerOpen = transientBreaker.isOpen();
-  const error = new Error(
+  throwKe2eRetryable(
     `${what}: transient gateway status ${response.statusCode} ` +
       `${describeEdgeResponse(response.statusCode, response.captured.res.headers)}` +
       (breakerOpen ? ` — ${transientBreaker.describe()}` : ''),
+    { retryable: !breakerOpen, afterMs: retryAfterMs(response.header('retry-after')) },
   );
-  (error as any).ke2eRetryable = !breakerOpen;
-  (error as any).ke2eRetryAfterMs = retryAfterMs(response.header('retry-after'));
-  throw error;
 }
 
 /**
@@ -320,6 +356,50 @@ export function expectApi(response: Res, what: string, ...statuses: number[]): R
   throwIfEdgeLaundered(response, what);
   if (statuses.length) response.status(statuses);
   return response;
+}
+
+/**
+ * The deployed smoke's warmup session create: build one session through the
+ * real route before the suite measures concurrent flows, so a cold provider
+ * image cannot break a flow's runtime deadline.
+ *
+ * The API answers a managed repo cloned within seconds of its provision with
+ * its typed, no-write `git_mirror_unavailable` 503 + Retry-After — the
+ * credential-propagation transient that killed release run 42666114535. The
+ * create is re-sent only on that `ke2eAppTransient` response. Deliberately NO
+ * Idempotency-Key: a keyed create is owned by the session-lifecycle
+ * (`create-session.ts` finalizes an inline throw into a requeued command row),
+ * which answers a replay with a 202-continuation or the row's stored error and
+ * a plain untyped 503 — a contract the harness only hard-asserts — and a
+ * fresh-keyed retry fights the drainer for one intent (two billed sandboxes).
+ */
+export async function createSandboxWarmupSession(
+  client: Client,
+  projectId: string,
+): Promise<string> {
+  return waitFor(
+    async () => {
+      const created = await client.post(
+        '/v1/projects/:projectId/sessions',
+        {},
+        {
+          params: { projectId },
+        },
+      );
+      created.status(201);
+      const id = created.json<{ session_id: string }>().session_id;
+      // Not retryable: a 201 without a session_id is a contract violation.
+      if (!id) throw new Error('sandbox setup returned no session_id');
+      return id;
+    },
+    {
+      until: (id) => !!id,
+      timeoutMs: 300_000,
+      intervalMs: 5000,
+      retryOnError: isKe2eAppTransientError,
+      description: 'sandbox warmup session create',
+    },
+  );
 }
 
 /**
@@ -644,13 +724,12 @@ export class Client {
           );
           continue;
         }
-        const e = new Error(
+        throwKe2eRetryable(
           `network error ${method} ${url} after ${attempt}/${maxAttempts} attempt(s): ` +
             `${err?.message ?? err}` +
             (breakerOpen ? ` — ${transientBreaker.describe()}` : ''),
+          { retryable: !breakerOpen },
         );
-        (e as any).ke2eRetryable = !breakerOpen;
-        throw e;
       }
 
       const bodyText = await res.text();

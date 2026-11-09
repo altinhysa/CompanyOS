@@ -16,6 +16,7 @@ import { Label } from '@kortix/ui/label';
 import { ProjectIconField } from '@kortix/ui/workspace/projects/modal/project-icon-field';
 import { useAuth } from '@/features/providers/auth-provider';
 import { AccountTopBar } from '@/features/workspace/account-top-bar';
+import { WorkspacePreviewArt } from '@/features/workspace/project-selector/workspace-preview-art';
 import { AdvancedFields } from '@kortix/ui/workspace/new/advanced-fields';
 import {
   INITIAL_FORM_STATE,
@@ -207,17 +208,19 @@ export function NewWorkspacePage() {
     !restrictedOut;
 
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-6 px-6 py-16">
-      {/* No `relative` on <main> on purpose: with no positioned ancestor in
-          this tree, the bar's `absolute` resolves against the initial
-          containing block — the true viewport edges — rather than the centered
-          max-w-md column. Sits ahead of the <form> so it stays reachable
+    // The same two halves as `/workspaces`: the form on the left, and at
+    // `lg` and up the preview of the workspace being made on the right.
+    <main className="bg-background relative grid min-h-svh w-full lg:grid-cols-2">
+      {/* `<main>` spans the viewport, so the bar's `absolute` resolves to the
+          true viewport edges; at `lg` it covers the left half only, so the
+          preview runs the full height. Sits ahead of the <form> so it stays reachable
           regardless of form state. `performSignOut`, not a bare `signOut()`:
           that neither awaited nor navigated, and left the user on the form. */}
       <AccountTopBar
         email={user?.email ?? null}
         name={user?.user_metadata?.name}
         pinned
+        className="lg:right-1/2"
         signingOut={signingOut}
         onLogOut={() => {
           setSigningOut(true);
@@ -238,6 +241,7 @@ export function NewWorkspacePage() {
         }
       />
 
+      <div className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-6 px-6 py-16">
       {/* TWO states, one swap — see the `SWAP_IN`/`SWAP_OUT` doc comment above.
           `initial={false}` so neither side fades in on first paint.
 
@@ -264,7 +268,7 @@ export function NewWorkspacePage() {
                 phase (KRTX-1543): the managed create reports its steps over
                 `/projects/provision-stream` and the handoff renders them;
                 `null` (GitHub sources, fallback) renders the base screen. */}
-            <WorkspaceHandoff workspaceName={state.name.trim()} phase={phase} />
+            <WorkspaceHandoff workspaceName={state.name.trim()} phase={phase} align="start" />
           </m.div>
         ) : (
           <m.div
@@ -274,11 +278,11 @@ export function NewWorkspacePage() {
             animate={{ opacity: 1, transition: SWAP_IN }}
             exit={{ opacity: 0, transition: SWAP_OUT }}
           >
-            <header className="flex flex-col gap-2 text-center">
+            <header className="flex flex-col gap-2">
               <h1 className="text-foreground text-2xl font-medium tracking-tight">
                 {tWorkspaces('title')}
               </h1>
-              <p className="text-muted-foreground text-sm text-balance">{tWorkspaces('description')}</p>
+              <p className="text-muted-foreground text-sm text-pretty">{tWorkspaces('description')}</p>
             </header>
 
             <form
@@ -471,7 +475,16 @@ export function NewWorkspacePage() {
           </m.div>
         )}
       </AnimatePresence>
+      </div>
 
+      {/* The preview half, at `lg` and up, the full height of the window; on
+          a phone the form is the whole page. The top margin clears the
+          desktop app's title-bar band (0 on the web). */}
+      <div className="sticky top-0 hidden h-svh flex-col p-3 lg:flex">
+        <div className="mt-(--kx-titlebar-inset) min-h-0 flex-1">
+          <WorkspacePreviewArt name={state.name} />
+        </div>
+      </div>
     </main>
   );
 }

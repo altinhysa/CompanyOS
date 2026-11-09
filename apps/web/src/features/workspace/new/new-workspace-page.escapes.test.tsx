@@ -59,6 +59,8 @@ mock.module('@/features/providers/auth-provider', () => ({
   }),
 }));
 mock.module('@/lib/auth/use-signed-out-redirect', () => ({ useSignedOutRedirect: () => {} }));
+// The preview half is decorative WebGL art; these tests read the form.
+mock.module('@/features/workspace/project-selector/workspace-preview-art', () => ({ WorkspacePreviewArt: () => null }));
 mock.module('@kortix/ui/internal/hooks/account/use-accounts-list', () => ({
   useAccountsList: () => ({
     data: [

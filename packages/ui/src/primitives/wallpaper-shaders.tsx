@@ -108,10 +108,18 @@ export const DitherShader = memo(function DitherShader() {
 // light end and deepen the dark end: the gradient stays whole and gains
 // grain. It fills its positioned parent. A slow tide moves the bands, and
 // reduced motion freezes it.
+//
+// The canvas arrives about a second after the page (the shader module loads
+// lazily), so it never pops in: from the moment it is inserted it fades in
+// from a soft blur over `--duration-slower` (`@starting-style`). Reduced
+// motion shows it at once.
+const TEXTURE_ENTER =
+  '[&_canvas]:transition-[opacity,filter] [&_canvas]:duration-(--duration-slower) [&_canvas]:ease-(--ease-out) [&_canvas]:starting:opacity-0 [&_canvas]:starting:blur-sm motion-reduce:[&_canvas]:transition-none';
+
 export const DitherTextureShader = memo(function DitherTextureShader() {
   const { reduceMotion } = useWallpaperTheme();
   return (
-    <ShaderRoot>
+    <ShaderRoot className={TEXTURE_ENTER}>
       <Dither
         colorA="#000000"
         colorB="#ffffff"

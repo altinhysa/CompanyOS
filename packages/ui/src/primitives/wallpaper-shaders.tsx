@@ -101,23 +101,23 @@ export const DitherShader = memo(function DitherShader() {
   );
 });
 
-// A blue dithered field for an art pane (the `/workspaces` create preview):
-// a diagonal luminance ramp quantized through the bayer matrix, dense pale
-// dots at the top-left thinning into solid deep blue at the bottom-right. The
-// two blues sit on the brand accent (#0099ff). It fills its positioned parent;
-// the parent paints a CSS gradient under it as the static fallback, so the
-// pane is never blank before WebGL starts. A slow tide moves the bands, and
+// A dither texture for an art pane (the `/workspaces` create preview): a
+// diagonal ramp quantized through the bayer matrix into white dots at the
+// top-left and black dots at the bottom-right. The host lays it over its own
+// gradient at low opacity with an overlay blend, so the dots lighten the
+// light end and deepen the dark end: the gradient stays whole and gains
+// grain. It fills its positioned parent. A slow tide moves the bands, and
 // reduced motion freezes it.
-export const BlueDitherShader = memo(function BlueDitherShader() {
+export const DitherTextureShader = memo(function DitherTextureShader() {
   const { reduceMotion } = useWallpaperTheme();
   return (
     <ShaderRoot>
       <Dither
-        colorA="#0a66d1"
-        colorB="#cfe8ff"
+        colorA="#000000"
+        colorB="#ffffff"
         colorMode="custom"
         pattern="bayer8"
-        pixelSize={4}
+        pixelSize={3}
         spread={1}
         threshold={0.5}
       >

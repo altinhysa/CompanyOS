@@ -888,7 +888,7 @@ Kortix reads the file and the files it points at as the format on this page: eac
 
 ### Deprecated keys
 
-Each row still validates. `kortix validate --fix` writes the replacement with the same meaning. The keys of `agent-workspace`, `agent-repository-access` and `agent-workspace-mode` have no effect: Kortix ignores them with a warning, and `--fix` and every Kortix write delete them.
+Each row still validates. `kortix validate --fix` writes the replacement with the same meaning. A session never checks out the repository, so the keys of `agent-workspace`, `agent-repository-access` and `agent-workspace-mode` are replaced by a grant: an agent that had the checkout gets `workspace.gitops.read` in `kortix_permissions`, so it can still run `kortix workspaces clone`. `--fix` and every Kortix write delete the keys.
 
 | Fix id | Deprecated | Write instead |
 | --- | --- | --- |
@@ -899,9 +899,9 @@ Each row still validates. `kortix validate --fix` writes the replacement with th
 | `agent-env` | An agent's `env` | `secrets` |
 | `agent-kortix-cli` | `kortix_cli` | `kortix_permissions` |
 | `agent-connectors-personal` | `connectors_personal` | `connectors_required` |
-| `agent-repository-access` | `repository_access: true` | Delete the key (deprecation `agent-workspace`). |
-| `agent-workspace-mode` | `workspace: branch` or `workspace: runtime` | Delete the key (deprecation `agent-workspace`). |
-| `agent-workspace` | An agent's `workspace: …` (any shape) or `repository_access: …` | Delete the key. A session never checks out the repository: the agent runs `kortix workspaces clone`. |
+| `agent-repository-access` | `repository_access: true` | `kortix_permissions` gains `workspace.gitops.read`; the key goes (deprecation `agent-workspace`). |
+| `agent-workspace-mode` | `workspace: branch` or `workspace: runtime` | `branch` adds `workspace.gitops.read`; `runtime` adds nothing; the key goes (deprecation `agent-workspace`). |
+| `agent-workspace` | An agent's `workspace: …` (any shape) or `repository_access: …` | `project_repository: true` adds `workspace.gitops.read` to `kortix_permissions` (`"*"` already holds it); any other value adds nothing. The key goes. A session never checks out the repository: the agent runs `kortix workspaces clone`. |
 | `sandbox-templates` | The top-level `sandboxes` list | `sandbox.templates` |
 | `sandbox-singular` | Image keys (`image`, `dockerfile`, `context`, …) set on `sandbox` itself | One `sandbox.templates` entry, named as `sandbox.default` |
 | `acp-runtimes` | `runtimes`, and an agent's `runtime` and `agent` | Nothing: delete them. Every session runs pi. |

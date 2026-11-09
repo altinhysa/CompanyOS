@@ -77,7 +77,7 @@ export function AgentDrivesSection({
     body = (
       <ErrorState
         size="sm"
-        title={t('loadError')}
+        title={agentName ? t('loadError') : t('projectLoadError')}
         action={
           <Button variant="outline" size="sm" onClick={() => void plan.refetch()}>
             {t('retry')}
@@ -87,7 +87,7 @@ export function AgentDrivesSection({
     );
   } else if (plan.data.mounts.length === 0) {
     body = (
-      <EmptyState media={<EmptyArt icon={HardDrivesIcon} />} title={t('emptyTitle')} description={t('emptyDescription')} />
+      <EmptyState media={<EmptyArt icon={HardDrivesIcon} />} title={t('emptyTitle')} description={agentName ? t('emptyDescription') : t('projectEmptyDescription')} />
     );
   } else {
     body = (

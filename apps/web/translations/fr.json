@@ -2047,7 +2047,13 @@
       "title": "Aucun modèle disponible",
       "description": "Connectez votre propre fournisseur pour commencer à utiliser cette session.",
       "upgradeDescription": "Mettez à niveau votre offre ou connectez votre propre fournisseur pour commencer à utiliser cette session."
-    }
+    },
+    "favorites": "Favoris",
+    "favoritesEmpty": "Ajoutez une étoile à un modèle pour le garder ici.",
+    "addFavorite": "Ajouter {model} aux favoris",
+    "removeFavorite": "Retirer {model} des favoris",
+    "groups": "Groupes de modèles",
+    "thinking": "Réflexion"
   },
   "sessionScope": {
     "resetDefault": "Rétablir la valeur par défaut",
@@ -2075,8 +2081,12 @@
   "sessionUi": {
     "modelGate": {
       "upgrade": "Passer à une offre supérieure",
-      "barTitle": "Aucun modèle connecté",
-      "barDescription": "connectez-en un pour commencer à discuter",
+      "offerTitle": "Utilisez votre abonnement ChatGPT ou Claude",
+      "connectChatGpt": "Connecter ChatGPT",
+      "connectClaude": "Connecter Claude",
+      "hidePlan": "Ne plus afficher {name}",
+      "chatGptPlan": "Abonnement Plus ou Pro",
+      "claudePlan": "Abonnement Pro ou Max",
       "connectModel": "Connecter un modèle",
       "imagesUnsupported": "{model} ne peut pas lire les images",
       "imagesUnsupportedHint": "retirez-les ou choisissez un autre modèle"
@@ -3383,6 +3393,9 @@
     },
     "inbox": {
       "title": "Boîte de réception",
+      "viewReview": "Review",
+      "viewNotifications": "Notifications",
+      "viewLabel": "Vue de la boîte de réception",
       "description": "Les nouvelles des sessions, déclencheurs et artefacts qui vous concernent, dans tous les espaces de travail.",
       "unreadLabel": "Boîte de réception : {count} non lues",
       "unreadCount": "{count} non lues",
@@ -24766,8 +24779,6 @@
       "models": "Modèles",
       "tabCapabilities": "Capacités",
       "summaryExcept": "{all} except {list}",
-      "pinToSidebar": "Épingler dans la barre latérale",
-      "unpinFromSidebar": "Retirer de la barre latérale",
       "spaceHelp": "L’espace de cet agent : un identifiant comme engineering ou sales. Vide : tout l’espace de travail.",
       "spacePlaceholder": "p. ex. engineering"
     },
@@ -25210,6 +25221,7 @@
     "replacedBy": "Remplacé par {path}.",
     "projectTool": "Module {path}",
     "loadError": "Impossible de charger les outils, skills et extensions de cet agent.",
+    "skillsLoadError": "Impossible de charger les skills.",
     "retry": "Réessayer",
     "emptyProjectSkills": "Aucun skill d’espace de travail. Enregistrez-en un sous skills dans kortix.yaml.",
     "emptyProjectExtensions": "Aucune extension d’espace de travail. Enregistrez-en une sous extensions dans kortix.yaml.",
@@ -26046,6 +26058,7 @@
     "skipped": "Not mounted, past the {slots} mount slots: {list}",
     "emptyTitle": "No folders mounted",
     "emptyDescription": "Montez un dossier de Fichiers pour fournir ses fichiers aux sessions de cet agent.",
+    "projectEmptyDescription": "Montez un dossier de Fichiers pour fournir ses fichiers à chaque nouvelle session.",
     "pickerTitle": "Mount a folder",
     "pickerDescription": "Pick a folder in Files. Sessions of {agent} see it under /drives.",
     "pickerPath": "Folder path",
@@ -26056,6 +26069,7 @@
     "alreadyMounted": "Mounted",
     "changeFailed": "Impossible de modifier ce montage.",
     "loadError": "Impossible de charger les montages de cet agent.",
+    "projectLoadError": "Impossible de charger les dossiers montés.",
     "retry": "Try again",
     "title": "Drives",
     "projectLead": "Dossiers Files que monte chaque nouvelle session.",
@@ -26538,6 +26552,7 @@
         "help": "Aide",
         "plan": "Forfait",
         "usage": "Utilisation",
+        "agents": "Agents",
         "connectors": "Connecteurs",
         "skills": "Compétences",
         "triggers": "Déclencheurs",

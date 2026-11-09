@@ -2047,7 +2047,13 @@
       "title": "Keine Modelle verfügbar",
       "description": "Verbinde deinen eigenen Anbieter, um diese Sitzung zu starten.",
       "upgradeDescription": "Führe ein Upgrade durch oder verbinde deinen eigenen Anbieter, um diese Sitzung zu starten."
-    }
+    },
+    "favorites": "Favoriten",
+    "favoritesEmpty": "Markiere ein Modell mit einem Stern, um es hier zu behalten.",
+    "addFavorite": "{model} zu Favoriten hinzufügen",
+    "removeFavorite": "{model} aus Favoriten entfernen",
+    "groups": "Modellgruppen",
+    "thinking": "Denken"
   },
   "sessionScope": {
     "resetDefault": "Auf Standard zurücksetzen",
@@ -2075,8 +2081,12 @@
   "sessionUi": {
     "modelGate": {
       "upgrade": "Upgrade",
-      "barTitle": "Kein Modell verbunden",
-      "barDescription": "Verbinde eines, um den Chat zu starten",
+      "offerTitle": "Nutze dein ChatGPT- oder Claude-Abo",
+      "connectChatGpt": "ChatGPT verbinden",
+      "connectClaude": "Claude verbinden",
+      "hidePlan": "{name} nicht mehr anzeigen",
+      "chatGptPlan": "Plus- oder Pro-Abo",
+      "claudePlan": "Pro- oder Max-Abo",
       "connectModel": "Modell verbinden",
       "imagesUnsupported": "{model} kann keine Bilder lesen",
       "imagesUnsupportedHint": "entferne sie oder wähle ein anderes Modell"
@@ -3383,6 +3393,9 @@
     },
     "inbox": {
       "title": "Posteingang",
+      "viewReview": "Review",
+      "viewNotifications": "Benachrichtigungen",
+      "viewLabel": "Posteingangsansicht",
       "description": "Neuigkeiten zu den Sitzungen, Triggern und Artefakten, die dich betreffen, aus allen Workspaces.",
       "unreadLabel": "Posteingang: {count} ungelesen",
       "unreadCount": "{count} ungelesen",
@@ -24766,8 +24779,6 @@
       "models": "Modelle",
       "tabCapabilities": "Fähigkeiten",
       "summaryExcept": "{all} except {list}",
-      "pinToSidebar": "An Seitenleiste anheften",
-      "unpinFromSidebar": "Von Seitenleiste lösen",
       "spaceHelp": "Der Bereich dieses Agenten: ein Bezeichner wie engineering oder sales. Leer: workspaceweit.",
       "spacePlaceholder": "z. B. engineering"
     },
@@ -25210,6 +25221,7 @@
     "replacedBy": "Ersetzt durch {path}.",
     "projectTool": "Modul {path}",
     "loadError": "Tools, Skills und Erweiterungen dieses Agents konnten nicht geladen werden.",
+    "skillsLoadError": "Die Skills konnten nicht geladen werden.",
     "retry": "Erneut versuchen",
     "emptyProjectSkills": "Keine Workspace-Skills. Registriere einen unter skills in kortix.yaml.",
     "emptyProjectExtensions": "Keine Workspace-Erweiterungen. Registriere eine unter extensions in kortix.yaml.",
@@ -26046,6 +26058,7 @@
     "skipped": "Not mounted, past the {slots} mount slots: {list}",
     "emptyTitle": "No folders mounted",
     "emptyDescription": "Binde einen Ordner aus Dateien ein, um seinen Inhalt den Sitzungen dieses Agenten bereitzustellen.",
+    "projectEmptyDescription": "Binde einen Ordner aus Dateien ein, um seinen Inhalt jeder neuen Sitzung bereitzustellen.",
     "pickerTitle": "Mount a folder",
     "pickerDescription": "Pick a folder in Files. Sessions of {agent} see it under /drives.",
     "pickerPath": "Folder path",
@@ -26056,6 +26069,7 @@
     "alreadyMounted": "Mounted",
     "changeFailed": "Diese Einbindung konnte nicht geändert werden.",
     "loadError": "Die Einbindungen dieses Agenten konnten nicht geladen werden.",
+    "projectLoadError": "Die eingebundenen Ordner konnten nicht geladen werden.",
     "retry": "Try again",
     "title": "Drives",
     "projectLead": "Files-Ordner, die jede neue Sitzung einbindet.",
@@ -26538,6 +26552,7 @@
         "help": "Hilfe",
         "plan": "Plan",
         "usage": "Nutzung",
+        "agents": "Agenten",
         "connectors": "Konnektoren",
         "skills": "Fähigkeiten",
         "triggers": "Trigger",

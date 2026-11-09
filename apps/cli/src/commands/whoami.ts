@@ -160,7 +160,15 @@ function whoamiJson(
     workspace_id: boundWorkspaceId(me) ?? def?.project_id ?? null,
     account_id: active?.account_id ?? auth.account_id ?? null,
     account: active ?? null,
-    accounts: me.accounts,
+    // Every membership inline made the payload unbounded: a member of hundreds
+    // of workspaces (the e2e fixtures' owner holds 487) blew past the MCP kortix
+    // tool's 45k stdout cap, so `--json` arrived cut and its json field was
+    // gone — the tool's own denial table sends identity lookups here, and the
+    // CLI contract (`kortix whoami --json | jq`) needs the whole value. The
+    // array keeps its shape and caps the rows; accounts_total says how many
+    // memberships exist, and the full list stays at GET /accounts/me.
+    accounts: me.accounts.slice(0, 50),
+    accounts_total: me.accounts.length,
     token_context: me.token_context ?? null,
     default_project: def,
   });

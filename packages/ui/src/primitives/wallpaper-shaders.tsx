@@ -101,6 +101,40 @@ export const DitherShader = memo(function DitherShader() {
   );
 });
 
+// A blue dithered field for an art pane (the `/workspaces` create preview):
+// a diagonal luminance ramp quantized through the bayer matrix, dense pale
+// dots at the top-left thinning into solid deep blue at the bottom-right. The
+// two blues sit on the brand accent (#0099ff). It fills its positioned parent;
+// the parent paints a CSS gradient under it as the static fallback, so the
+// pane is never blank before WebGL starts. A slow tide moves the bands, and
+// reduced motion freezes it.
+export const BlueDitherShader = memo(function BlueDitherShader() {
+  const { reduceMotion } = useWallpaperTheme();
+  return (
+    <ShaderRoot>
+      <Dither
+        colorA="#0a66d1"
+        colorB="#cfe8ff"
+        colorMode="custom"
+        pattern="bayer8"
+        pixelSize={4}
+        spread={1}
+        threshold={0.5}
+      >
+        <LinearGradient colorA="#ffffff" colorB="#000000" start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+        <WaveDistortion
+          angle={45}
+          edges="stretch"
+          frequency={1.1}
+          speed={reduceMotion ? 0 : 0.3}
+          strength={0.08}
+          waveType="sine"
+        />
+      </Dither>
+    </ShaderRoot>
+  );
+});
+
 // Slow flowing gradient in four near-page tones — silk in monochrome.
 export const SilkShader = memo(function SilkShader() {
   const { isDark, reduceMotion } = useWallpaperTheme();

@@ -20,9 +20,9 @@ import { useTranslations as useI18nTranslations } from '@/i18n/use-translations'
  * settings" (the one Settings panel, `/workspaces/<id>/admin`) → "Switch
  * workspace" (the list, with the pending-invitation count, and "Create
  * workspace" at its foot) → Inbox → "Preferences" (the person's own settings
- * overlay; it keeps Mod+,) → More (Apps and extensions, Appearance, Help,
- * Download app) → "Leave {name}" (never for the last owner) → Log out, with
- * the signed-in identity under it. Rename lives in Workspace settings ›
+ * overlay; it keeps Mod+,) → Appearance (themes) → Apps and extensions →
+ * Download app → Help (links) → "Leave {name}" (never for the last owner) →
+ * Log out, with the signed-in identity under it. Rename lives in Workspace settings ›
  * General.
  *
  * Preferences pokes `useSettingsPanelStore.openSettings('profile')`: this
@@ -93,7 +93,6 @@ import {
   ArrowsLeftRightIcon,
   BellIcon,
   CaretUpDownIcon,
-  DotsThreeIcon,
   GearSixIcon as CogOne,
   DoorOpenIcon,
   SignOutIcon as LogOut,
@@ -298,39 +297,30 @@ export function WorkspaceSwitcher({ projectId }: { projectId: string }) {
             <DropdownMenuShortcut>{settingsShortcutLabel()}</DropdownMenuShortcut>
           </DropdownMenuItem>
         );
-      case 'more':
-        // Rows a person opens rarely, one level down: the top level keeps
-        // only what is used daily.
+      case 'appearance':
+        // The theme list, one level down. Never inside another submenu.
+        return <ThemeSubmenu />;
+      case 'apps':
         return (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <DotsThreeIcon />
-              <span className="min-w-0 flex-1 truncate">{tWorkspaceMenu('more')}</span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent className="w-[14rem] space-y-0.5" sideOffset={6}>
-                <DropdownMenuItem
-                  onSelect={() => deferAfterClose(() => useAppsModalStore.getState().setOpen(true))}
-                  size="sm"
-                >
-                  <PuzzlePieceIcon />
-                  {t('workspace.appsAndExtensions')}
-                </DropdownMenuItem>
-                <ThemeSubmenu />
-                <HelpSubmenu onClose={() => setMenuOpen(false)} />
-                {/* A modal, not a route: the user stays in the workspace. */}
-                <DropdownMenuItem
-                  onSelect={() => deferAfterClose(() => setDownloadOpen(true))}
-                  size="sm"
-                  data-desktop-hidden
-                >
-                  <Download />
-                  {t('workspace.downloadApp')}
-                </DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
+          <DropdownMenuItem
+            onSelect={() => deferAfterClose(() => useAppsModalStore.getState().setOpen(true))}
+            size="sm"
+          >
+            <PuzzlePieceIcon />
+            {t('workspace.appsAndExtensions')}
+          </DropdownMenuItem>
         );
+      case 'download':
+        // A modal, not a route: the user stays in the workspace. The desktop
+        // shell hides it (`data-desktop-hidden`).
+        return (
+          <DropdownMenuItem onSelect={() => deferAfterClose(() => setDownloadOpen(true))} size="sm" data-desktop-hidden>
+            <Download />
+            {t('workspace.downloadApp')}
+          </DropdownMenuItem>
+        );
+      case 'help':
+        return <HelpSubmenu onClose={() => setMenuOpen(false)} />;
       case 'leave':
         // Leave and Log out end something, so they sit last, and both confirm first.
         return (
@@ -426,7 +416,9 @@ export function WorkspaceSwitcher({ projectId }: { projectId: string }) {
               align="start"
               side="bottom"
               sideOffset={6}
-              className="border-foreground/10 w-[16rem] space-y-0.5 overflow-hidden shadow-lg"
+              // Every row is top-level now, so a short window can be shorter
+              // than the menu: it scrolls instead of clipping rows off screen.
+              className="border-foreground/10 max-h-(--radix-dropdown-menu-content-available-height) w-[16rem] space-y-0.5 overflow-x-hidden overflow-y-auto shadow-lg"
             >
               {menuGroups.map((group, index) => (
                 <React.Fragment key={group.join('-')}>

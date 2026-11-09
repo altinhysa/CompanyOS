@@ -40,6 +40,12 @@ Art is a sanctioned layer of the system. It is the only layer where raw color, g
 - **Where:** a first-run empty state, with one muted line below it (#7337: "Sessions you start will show up here"). Mobile has the same idea as a pixel flower (`apps/mobile/components/kortix/PixelDeadFlower.tsx`).
 - **Not:** as a logo substitute. It is art, not the brand mark. Not the empty state of a tab, a folder or a list: that is `EmptyArt` (D14).
 
+### Workspace preview field
+
+- **What:** a blue gradient field, every stop derived from `kortix-base`, with a product window that bleeds off its right and bottom edges (`apps/web/src/features/workspace/project-selector/workspace-preview-art.tsx`, `WorkspacePreviewArt`). The window's sidebar shows the workspace name the person types, in the real sidebar's tile and row. It is `aria-hidden`.
+- **Where:** the right half of `/workspaces`, at desktop widths (`lg` and up). The founder asked for the split layout and the blue field (2026-11-09).
+- **Not:** behind a form, a list or any text a person reads. Not on a phone: the form is the whole page there.
+
 ### Empty-state art
 
 - **What:** two cards fanned behind a front card, drawn in `fill-card`, `fill-muted` and `stroke-foreground/*` (`packages/ui/src/primitives/empty-art.tsx`, `EmptyArt`). With `icon`, one Phosphor glyph sits on the front card in `text-muted-foreground`; without it, the front card is a document. It is `aria-hidden`.

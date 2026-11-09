@@ -7,13 +7,15 @@
  *     (the list, with the pending-invitation count; Create workspace sits at
  *     the bottom of that list, beside the workspaces it adds to);
  *  3. the person: Inbox (notifications from every workspace, KRTX-1742) ·
- *     Preferences (Mod+,) · More (Apps and extensions, Appearance, Help,
- *     Download app: rows a person opens rarely, one level down);
- *  4. Leave {name} · Log out.
+ *     Preferences (Mod+,) · Appearance (the theme list, one level down);
+ *  4. the product: Apps and extensions · Download app · Help (the reference
+ *     links, one level down);
+ *  5. Leave {name} · Log out.
  *
- * Seven rows at most at the top level: the rows used daily stay in reach,
- * and the rest wait one hover away. Each gated row follows the gate its
- * target applies, so a row never opens a page that refuses the caller.
+ * Every row sits at the top level. A submenu holds only a list (workspaces,
+ * themes, help links), and no submenu holds another submenu. Each gated row
+ * follows the gate its target applies, so a row never opens a page that
+ * refuses the caller.
  */
 export type WorkspaceMenuRow =
   | 'header'
@@ -22,7 +24,10 @@ export type WorkspaceMenuRow =
   | 'switch'
   | 'inbox'
   | 'preferences'
-  | 'more'
+  | 'appearance'
+  | 'apps'
+  | 'download'
+  | 'help'
   | 'leave'
   | 'logout';
 
@@ -46,7 +51,8 @@ export function workspaceMenuGroups(gates: WorkspaceMenuGates): WorkspaceMenuRow
       ...(gates.canOpenSettings ? (['settings'] as const) : []),
       'switch',
     ],
-    [...(gates.hasInbox ? (['inbox'] as const) : []), 'preferences', 'more'],
+    [...(gates.hasInbox ? (['inbox'] as const) : []), 'preferences', 'appearance'],
+    ['apps', 'download', 'help'],
     [...(gates.canLeave ? (['leave'] as const) : []), 'logout'],
   ];
   return groups.filter((group) => group.length > 0);

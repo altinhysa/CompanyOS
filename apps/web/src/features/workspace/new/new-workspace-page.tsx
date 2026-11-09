@@ -217,6 +217,7 @@ export function NewWorkspacePage() {
       <AccountTopBar
         email={user?.email ?? null}
         name={user?.user_metadata?.name}
+        pinned
         signingOut={signingOut}
         onLogOut={() => {
           setSigningOut(true);

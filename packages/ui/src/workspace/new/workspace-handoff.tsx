@@ -73,8 +73,14 @@ export const HANDOFF_STEPS = [
 export function WorkspaceHandoff({
   workspaceName,
   phase,
+  align = 'center',
 }: {
   workspaceName: string;
+  /**
+   * `start` lines the screen up on the left edge of its column (the
+   * `/workspaces` split, where the form before it was left-aligned).
+   */
+  align?: 'center' | 'start';
   /**
    * The latest streamed provisioning phase from `useCreateWorkspace`, or
    * `null`/absent when the create reports none.
@@ -95,7 +101,7 @@ export function WorkspaceHandoff({
       role="status"
       aria-live="polite"
       aria-busy="true"
-      className="flex flex-col items-center gap-6 text-center"
+      className={cn('flex flex-col gap-6', align === 'start' ? 'items-start text-left' : 'items-center text-center')}
     >
       <KortixLogo
         aria-hidden

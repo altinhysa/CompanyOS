@@ -26669,8 +26669,7 @@
     "menu": {
       "invite": "Inviter des personnes dans {name}",
       "leave": "Quitter {name}",
-      "invitePeople": "Inviter des personnes",
-      "more": "Plus"
+      "invitePeople": "Inviter des personnes"
     },
     "roles": {
       "owner": {

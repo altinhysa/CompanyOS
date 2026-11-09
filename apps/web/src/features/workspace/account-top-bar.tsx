@@ -5,8 +5,10 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { cn } from '@kortix/ui';
 import { Button } from '@kortix/ui/button';
 import { BackPillBody, backPillClass } from '@kortix/ui/back-pill';
+import { EntityAvatar } from '@kortix/ui/entity-avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,8 +48,11 @@ export function AccountTopBar({
   signingOut,
   onLogOut,
   back,
+  leading,
   trailing,
   inbox = true,
+  pinned = false,
+  className,
 }: {
   email: string | null;
   name?: string | null;
@@ -55,16 +60,36 @@ export function AccountTopBar({
   onLogOut: () => void;
   /** Rendered as a ghost link on the left. Omit on a page with nowhere to go back to. */
   back?: { href: string; label: string };
+  /** Shown on the left when there is no `back` link (the Kortix mark on `/workspaces`). */
+  leading?: ReactNode;
   /** Extra controls after the account button (the desktop close button). */
   trailing?: ReactNode;
   /** The Inbox button. Off on `/inbox` itself, where it would open the page on screen. */
   inbox?: boolean;
+  /**
+   * Keep the row on screen while the page scrolls, at `lg` and up only
+   * (`/workspaces`, `/workspaces/new`). On a phone the row scrolls away with
+   * the page, so it never covers the form under the thumb.
+   */
+  pinned?: boolean;
+  /** Layout overrides for the row (the `/workspaces` split keeps it over the left half). */
+  className?: string;
 }) {
   const t = useTranslations('newWorkspace');
   const identity = name?.trim() || email;
 
   return (
-    <div className="kx-desktop-band-row absolute inset-x-0 top-3 z-10 flex items-center justify-between gap-3 px-4 sm:top-4 sm:px-6">
+    <div
+      className={cn(
+        'kx-desktop-band-row absolute inset-x-0 top-3 z-10 flex items-center justify-between gap-3 px-4 sm:top-4 sm:px-6',
+        // Pinned at `lg`: fixed, on the page background, so content that
+        // scrolls under it never collides with the logo or the account.
+        // The padding keeps the controls where `top-4` put them; the desktop
+        // app's band offset replaces it (`kx-pinned-account-row`).
+        pinned && 'kx-pinned-account-row lg:bg-background lg:fixed lg:top-0 lg:pt-4 lg:pb-2',
+        className,
+      )}
+    >
       {back ? (
         // The web needs an in-page exit; Electron supplies Back in its band.
         <Button
@@ -78,7 +103,7 @@ export function AccountTopBar({
           </Link>
         </Button>
       ) : (
-        <span aria-hidden />
+        (leading ?? <span aria-hidden />)
       )}
 
       <div className="flex min-w-0 items-center gap-2">
@@ -89,13 +114,16 @@ export function AccountTopBar({
               type="button"
               disabled={signingOut}
               aria-label={identity ? `${t('account.loggedInAs')} ${identity}` : t('account.label')}
-              className="hover:bg-hover data-[state=open]:bg-hover focus-visible:ring-ring flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-(--duration-normal) ease-out focus-visible:ring-2 focus-visible:outline-none"
+              className="hover:bg-hover data-[state=open]:bg-hover focus-visible:ring-ring flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors duration-(--duration-normal) ease-out focus-visible:ring-2 focus-visible:outline-none"
             >
-              <span className="flex min-w-0 flex-col">
-                <span className="text-muted-foreground text-xs">{t('account.loggedInAs')}</span>
-                <span className="text-foreground max-w-56 truncate text-sm">
-                  {identity ?? t('account.label')}
-                </span>
+              {/* One line: who you are, no "Logged in as" caption. The
+                  caption stays in the accessible name above. */}
+              {identity ? <EntityAvatar label={identity} size="xs" /> : null}
+              {/* On a phone the tile alone is the button; the address would crowd the logo. */}
+              <span
+                className={cn('text-foreground max-w-48 truncate text-sm', identity && 'hidden sm:inline')}
+              >
+                {identity ?? t('account.label')}
               </span>
               {signingOut ? (
                 <Loading className="size-4 shrink-0" />

@@ -26669,8 +26669,7 @@
     "menu": {
       "invite": "Позови људе у {name}",
       "leave": "Напусти {name}",
-      "invitePeople": "Позови људе",
-      "more": "Више"
+      "invitePeople": "Позови људе"
     },
     "roles": {
       "owner": {

@@ -2,7 +2,7 @@
 
 import { acceptAccountInviteAndLand, type MyAccountInvite, type ProvisionPhase } from '@kortix/sdk';
 import { qk } from '@kortix/sdk/react';
-import { ArrowRightIcon, MagnifyingGlassIcon, PlusIcon } from '@phosphor-icons/react';
+import { ArrowRightIcon, MagnifyingGlassIcon, PlusIcon, SlidersHorizontalIcon } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -47,11 +47,15 @@ import {
 } from '@kortix/ui/workspace/new/workspace-name';
 import { useWorkspaceStateActions } from '@kortix/ui/workspace/sidebar/use-workspace-list';
 import { useProjectSelectorData } from './use-project-selector-data';
+import { WorkspacePreviewArt } from './workspace-preview-art';
 
 /**
  * `/workspaces` — create a workspace or join one, Slack-style.
  *
- * One column, three states (`project-selector-model.ts`):
+ * Three states (`project-selector-model.ts`). While a workspace is being
+ * named or made, the page splits: the form on the left, and at `lg` and up
+ * a preview window on a blue field on the right (`WorkspacePreviewArt`) that
+ * shows the name being typed. The other states are one centered column:
  *
  *  - 0 workspaces, 0 invites — "Create a workspace" with the create form on
  *    the page: the name (a suggested one prefilled) and one primary button in
@@ -138,9 +142,26 @@ export function ProjectSelectorView(props: ProjectSelectorViewProps) {
         ? [t('invitesTitle'), t('invitesBody')]
         : [t('createTitle'), t('createBody')];
 
+  // The preview half shows while a workspace is being named or made. The
+  // list and invites states have nothing to preview and stay one column.
+  const preview = creating ?? (!loading && !loadFailed ? inlineCreate : undefined);
+  // The split's column is the form's width; one column keeps the list width.
+  const column = cn('mx-auto my-auto w-full', preview ? 'max-w-sm' : 'max-w-lg');
+
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-lg flex-col px-6 py-20">
-      <AccountTopBar email={email} name={props.name} signingOut={props.signingOut} onLogOut={props.onLogOut} />
+    <main className={cn('bg-background relative grid min-h-svh w-full', preview && 'lg:grid-cols-2')}>
+      {/* The logo, the Inbox and the account. In the split the row covers the
+          left half only, so the field on the right runs the full height. */}
+      <AccountTopBar
+        email={email}
+        name={props.name}
+        signingOut={props.signingOut}
+        onLogOut={props.onLogOut}
+        leading={<KortixLogo size={18} />}
+        pinned
+        className={preview ? 'lg:right-1/2' : undefined}
+      />
+      <div className="flex min-h-svh flex-col px-6 py-20 sm:px-12">
 
       {/* `my-auto` centers the block in the viewport while it fits, and lets
           it start at the top and scroll once the list is taller. Blank while
@@ -149,19 +170,20 @@ export function ProjectSelectorView(props: ProjectSelectorViewProps) {
       {loading ? null : creating ? (
         // The page turns over to the handoff, as `/workspaces/new` does: the
         // heading "Create a workspace" above a create in flight is stale.
-        <div className="my-auto w-full">
-          <WorkspaceHandoff workspaceName={creating.name.trim()} phase={creating.phase} />
+        <div className={column}>
+          <WorkspaceHandoff workspaceName={creating.name.trim()} phase={creating.phase} align="start" />
         </div>
       ) : (
-        <div className="my-auto w-full">
-          <header className="flex flex-col items-center gap-2 text-center">
-            <KortixLogo size={28} variant="icon" className="mb-3" />
+        <div className={column}>
+          {/* One left edge for every element below: heading, copy, field,
+              button and hint all start on the same line. */}
+          <header className="flex flex-col gap-2">
             <h1 className="text-foreground text-2xl font-semibold tracking-tight">{title}</h1>
-            <p className="text-muted-foreground text-sm text-balance">{description}</p>
+            <p className="text-muted-foreground text-sm text-pretty">{description}</p>
           </header>
 
           {loadFailed ? (
-            <div className="mt-10 flex flex-col items-center gap-3 text-center">
+            <div className="mt-10 flex flex-col items-start gap-3">
               <div className="space-y-1">
                 <p className="text-sm font-medium">{t('loadErrorTitle')}</p>
                 <p className="text-muted-foreground text-xs">{t('loadErrorBody')}</p>
@@ -236,9 +258,9 @@ export function ProjectSelectorView(props: ProjectSelectorViewProps) {
               ) : null}
 
               {createHref && inlineCreate ? (
-                <div className="flex flex-col items-center gap-6">
+                <div className="flex flex-col gap-8">
                   <InlineCreateForm createHref={createHref} form={inlineCreate} />
-                  <p className="text-muted-foreground max-w-sm text-center text-xs text-balance">
+                  <p className="text-muted-foreground border-border border-t pt-6 text-xs text-pretty">
                     {t('invitedHint', { email: email ?? '' })}
                   </p>
                 </div>
@@ -255,7 +277,7 @@ export function ProjectSelectorView(props: ProjectSelectorViewProps) {
                     </Link>
                   </Button>
                   {!hasWorkspaces && !hasInvites ? (
-                    <p className="text-muted-foreground text-center text-xs text-balance">
+                    <p className="text-muted-foreground text-xs text-pretty">
                       {t('invitedHint', { email: email ?? '' })}
                     </p>
                   ) : null}
@@ -265,6 +287,18 @@ export function ProjectSelectorView(props: ProjectSelectorViewProps) {
           )}
         </div>
       )}
+      </div>
+
+      {/* The preview half, at `lg` and up, the full height of the window; on
+          a phone the form is the whole page. The top margin clears the
+          desktop app's title-bar band (0 on the web). */}
+      {preview ? (
+        <div className="sticky top-0 hidden h-svh flex-col p-3 lg:flex">
+          <div className="mt-(--kx-titlebar-inset) min-h-0 flex-1">
+            <WorkspacePreviewArt name={preview.name} />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -281,7 +315,7 @@ function InlineCreateForm({ createHref, form }: { createHref: string; form: Inli
   const tNew = useTranslations('newWorkspace');
   return (
     <form
-      className="flex w-full max-w-sm flex-col gap-3"
+      className="flex w-full flex-col gap-3"
       data-testid="selector-create-form"
       onSubmit={(event) => {
         event.preventDefault();
@@ -317,8 +351,8 @@ function InlineCreateForm({ createHref, form }: { createHref: string; form: Inli
         {t('createAction')}
       </Button>
       {form.error ? (
-        <div role="alert" className="flex flex-col items-center gap-1.5">
-          <p className="text-destructive text-center text-xs">{form.error}</p>
+        <div role="alert" className="flex flex-col items-start gap-1.5">
+          <p className="text-destructive text-xs">{form.error}</p>
           {form.canRetry ? (
             <Button
               type="button"
@@ -332,8 +366,11 @@ function InlineCreateForm({ createHref, form }: { createHref: string; form: Inli
           ) : null}
         </div>
       ) : null}
-      <Button asChild variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground self-center">
+      {/* The second way in, the same width as the first: the icon and the
+          repository live on `/workspaces/new`. */}
+      <Button asChild variant="outline" className="w-full gap-1.5">
         <Link href={createHref} prefetch data-testid="selector-create-more">
+          <SlidersHorizontalIcon className="size-4 shrink-0" />
           {t('moreOptions')}
         </Link>
       </Button>

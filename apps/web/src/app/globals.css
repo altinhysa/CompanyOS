@@ -1211,6 +1211,12 @@ html[data-desktop='true'] .kx-desktop-band-row {
     calc(var(--kx-titlebar-control-top) + var(--kx-titlebar-control-size) + var(--spacing))
   );
 }
+/* A pinned row (`AccountTopBar pinned`) pads its top on the web to stand in
+   for `top-4`. In the desktop app the band offset above already places it,
+   so the padding would push the controls lower than on other pages. */
+html[data-desktop='true'] .kx-pinned-account-row {
+  padding-top: 0;
+}
 html[data-desktop='true'] .kx-web-only-back {
   display: none;
 }

@@ -10,7 +10,8 @@ describe('workspaceMenuGroups — the workspace menu, top to bottom', () => {
     expect(workspaceMenuGroups(ALL)).toEqual([
       ['header'],
       ['invite', 'settings', 'switch'],
-      ['inbox', 'preferences', 'more'],
+      ['inbox', 'preferences', 'appearance'],
+      ['apps', 'download', 'help'],
       ['leave', 'logout'],
     ]);
   });
@@ -19,7 +20,8 @@ describe('workspaceMenuGroups — the workspace menu, top to bottom', () => {
     expect(workspaceMenuGroups({ ...NONE, canLeave: true })).toEqual([
       ['header'],
       ['switch'],
-      ['preferences', 'more'],
+      ['preferences', 'appearance'],
+      ['apps', 'download', 'help'],
       ['leave', 'logout'],
     ]);
   });
@@ -30,10 +32,12 @@ describe('workspaceMenuGroups — the workspace menu, top to bottom', () => {
     expect(rows.at(-1)).toBe('logout');
   });
 
-  test('the top level stays short: rarely used rows wait under More', () => {
+  test('every row sits at the top level: no More row hides other rows', () => {
     const rows = workspaceMenuGroups(ALL).flat() as string[];
-    expect(rows.filter((row) => row !== 'header').length).toBeLessThanOrEqual(8);
-    for (const rare of ['apps', 'appearance', 'help', 'download', 'create']) expect(rows).not.toContain(rare);
+    expect(rows).not.toContain('more');
+    for (const row of ['apps', 'appearance', 'help', 'download']) expect(rows).toContain(row);
+    // Create workspace stays at the foot of the Switch workspace list.
+    expect(rows).not.toContain('create');
   });
 
   test('the Inbox is a menu row above Preferences, below the workspace rows (KRTX-1742)', () => {

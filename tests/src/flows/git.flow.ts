@@ -20,6 +20,7 @@ import { flow } from "../core/flow";
 import { withTransientGitRetry } from "../fixtures/git-transient";
 import { serveFixtureRepoLocally } from "../fixtures/local-git";
 import { withDb } from "../fixtures/chat";
+import { lockProjectFirst } from '../fixtures/token-binding-lock';
 
 const UNKNOWN = "00000000-0000-4000-a000-000000000000";
 
@@ -510,21 +511,10 @@ flow(
       // The grant is written in the PRE-RENAME stored shape (`kortixCli`, not
       // `permissions`) on purpose: rows minted before 2026-09-22 carry it, and
       // the push below only succeeds if `readStoredAgentGrant` still honors it.
-      // The token trigger locks the project row FOR SHARE NOWAIT and fails
-      // closed (55P03) when another writer holds it, such as the config
-      // summary build that follows project creation. Retry that contention.
-      for (let attempt = 1; ; attempt++) {
-        try {
-          await db.query(`UPDATE kortix.account_tokens
-            SET project_id = $2, session_id = $3, agent_grant = $4::jsonb, account_id = $5, user_id = $6 WHERE token_id = $1`,
-          [tokenId, project.id, sessionId,
-            JSON.stringify({ agent: 'worker', kortixCli: 'all', connectors: 'all', env: [] }), team.id, userId]);
-          break;
-        } catch (error) {
-          if ((error as { code?: string }).code !== '55P03' || attempt >= 10) throw error;
-          await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
-        }
-      }
+      await db.query(lockProjectFirst(`UPDATE kortix.account_tokens
+        SET project_id = $2, session_id = $3, agent_grant = $4::jsonb, account_id = $5, user_id = $6 WHERE token_id = $1`),
+      [tokenId, project.id, sessionId,
+        JSON.stringify({ agent: 'worker', kortixCli: 'all', connectors: 'all', env: [] }), team.id, userId]);
       return { secret, sessionId };
     };
     const git = async (secret: string, args: string[], expected = 0) => {
@@ -629,9 +619,9 @@ flow(
         });
         created.status(201);
         const { token_id: tokenId, secret_key: secret } = created.json<{ token_id: string; secret_key: string }>();
-        await db.query(`UPDATE kortix.account_tokens
+        await db.query(lockProjectFirst(`UPDATE kortix.account_tokens
           SET project_id = $2, session_id = $3, agent_grant = NULL, account_id = $4, user_id = $5
-          WHERE token_id = $1`, [tokenId, project.id, owner.sessionId, team.id, ctx.P.OWNER.userId]);
+          WHERE token_id = $1`), [tokenId, project.id, owner.sessionId, team.id, ctx.P.OWNER.userId]);
 
         const crPath = `/projects/${project.id}/change-requests`;
         const send = async (path: string, body: Record<string, unknown>) => {

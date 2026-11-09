@@ -10,6 +10,7 @@ import { currentRecorder } from './context';
 import { assert, BodyAssert } from './expect';
 import { log } from './log';
 import type { Captured } from './result';
+import { scrubSecretShapes } from './scrub';
 
 export type Auth =
   | { mode: 'none' }
@@ -167,6 +168,11 @@ export class Res {
       expected: codes,
       actual: this.statusCode,
       pass: codes.includes(this.statusCode),
+      // A failed status assert keeps what the response says: origin vs edge and
+      // the body, cut. A deployed smoke's 5xx body names the cause (provider
+      // capacity, GITHUB_RATE_LIMITED, …) — without it the run log is a bare
+      // status and every triage starts from zero (release gate 42666114535).
+      ...(codes.includes(this.statusCode) ? {} : { detail: statusAssertDetail(this) }),
     });
     return this;
   }
@@ -359,6 +365,20 @@ export function describeEdgeResponse(
     `x-maintenance-mode=${maintenance ?? 'absent'} ` +
     `x-request-id=${requestId ? 'present' : 'absent'}]`
   );
+}
+
+/** The `detail` a failed status assert carries: origin/edge classification plus
+ *  the body, cut. A deployed 5xx body names its cause ("provider at capacity",
+ *  `GITHUB_RATE_LIMITED`, `KORTIX_URL_UNREACHABLE`) — a bare "got 503" does not.
+ *  The body goes through the same redaction as a captured response (key-based,
+ *  capture-time) and then the shape scrub (`scrub.ts`, the last line the runner
+ *  writes to public CI logs — Strix CWE-532 on the first version of this line). */
+function statusAssertDetail(res: Res): string {
+  const body = redactBodyText(res.text().trim()) ?? '';
+  return [
+    describeEdgeResponse(res.statusCode, res.captured.res.headers),
+    body ? `body=${scrubSecretShapes(body).slice(0, 500)}` : 'body=<empty>',
+  ].join(' ');
 }
 
 const RETRY_BASE_DELAY_MS = Number(process.env.KE2E_RETRY_BASE_DELAY_MS ?? 500);

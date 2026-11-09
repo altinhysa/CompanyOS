@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { gatewayErrorResponse } from '@kortix/llm-gateway';
-import { TokenBucketRateLimiter } from '@kortix/shared/rate-limit';
+import { type RateLimitResult, TokenBucketRateLimiter } from '@kortix/shared/rate-limit';
 
 /**
  * The per-credential request limit on every model route of this service. It
@@ -11,39 +11,97 @@ import { TokenBucketRateLimiter } from '@kortix/shared/rate-limit';
  * same limit under the same setting, `KORTIX_LLM_GATEWAY_REQS_PER_MIN`
  * (default 600 per minute per credential).
  *
- * The key is a SHA-256 of the credential, so no raw secret stays in memory.
- * A request without a credential is not counted: the pipeline refuses it with
- * 401 before it calls the API.
+ * The limit runs before `authenticate()`, so it cannot tell a real credential
+ * from a fabricated one. A credential the API has answered with a principal
+ * keeps its own bucket, keyed on the credential's SHA-256 so no raw secret
+ * stays in memory. Every credential not validated yet is charged to ONE shared
+ * bucket instead of a private one: a caller that sends a fresh made-up bearer
+ * per request cannot buy a private bucket each time, so the shared allowance
+ * bounds how many requests reach the API unverified (CWE-770), and the bucket
+ * map cannot grow one entry per request. `validated(credential)` moves a real
+ * credential onto its own budget. A request without a credential is not
+ * counted: the pipeline refuses it with 401 before it calls the API.
  *
  * Each gateway task counts alone, so the fleet allows limit × tasks. This
  * stops a runaway loop or a flood on one credential. It is not a quota.
  *
  * Returns the 429 response, or null when the request may continue.
  */
-export function createTokenRateLimit(limitPerMinute: number): (request: Request, headers?: Headers) => Response | null {
+export function createTokenRateLimit(limitPerMinute: number): {
+  /** The limit for one request, charged to the credential's own bucket once validated, else to the shared one. */
+  (request: Request, headers?: Headers): Response | null;
+  /** The API answered this credential with a principal; it keeps its own bucket from now on. */
+  validated: (credential: string) => void;
+  /** The live bucket keys; KRTX-4528 proves a flood of fakes leaves only the shared one. */
+  buckets: () => string[];
+} {
   const limiter = new TokenBucketRateLimiter('gateway_token');
-  return (request, headers = new Headers()) => {
-    const credential = credentialOf(request);
-    if (!credential) return null;
-    const key = createHash('sha256').update(credential).digest('hex');
-    const result = limiter.check(key, { limit: limitPerMinute, windowMs: 60_000 });
+  const validatedKeys = new Set<string>();
+  // Credentials charged to the shared bucket while unvalidated; their slot is
+  // refunded once, when the API validates them, so real traffic does not drain
+  // the allowance every new credential shares. Bounded to the shared allowance
+  // itself: at most that many unvalidated credentials can be admitted in a
+  // window, so the set can never outgrow it.
+  const chargedShared = new Set<string>();
+
+  const policy = { limit: limitPerMinute, windowMs: 60_000 };
+  const limit = (request: Request, headers = new Headers()): Response | null => {
+    const key = credentialOf(request);
+    if (!key) return null;
+    // A validated credential keeps its own budget; anything else shares one
+    // bucket, so a rotating fake bearer spends the shared allowance, never its
+    // own private one.
+    const own = validatedKeys.has(key);
+    const result = limiter.check(own ? key : UNVALIDATED, policy);
+    if (!own && result.allowed) track(chargedShared, key, Math.max(1, limitPerMinute));
     headers.set('RateLimit-Limit', String(result.limit));
     headers.set('RateLimit-Remaining', String(result.remaining));
     headers.set('RateLimit-Reset', String(Math.ceil(result.resetMs / 1000)));
-    if (result.allowed) return null;
-    // A refusal must also stop the upload: an unread body is still buffered.
-    request.body?.cancel().catch(() => {});
-    const retryAfterSeconds = Math.max(1, Math.ceil((result.retryAfterMs ?? result.resetMs) / 1000));
-    const response = rateLimitedResponse(new URL(request.url).pathname, retryAfterSeconds);
-    headers.forEach((value, name) => response.headers.set(name, value));
-    return response;
+    return result.allowed ? null : refuse(request, headers, result);
   };
+  limit.validated = (credential: string) => {
+    const key = hashOf(credential);
+    validatedKeys.add(key);
+    // Give back the shared slot this credential's pre-validation request took,
+    // once: it now has its own budget to be counted against.
+    if (chargedShared.delete(key)) limiter.refund(UNVALIDATED);
+  };
+  limit.buckets = () => limiter.keys();
+  return limit;
 }
 
-/** The bearer token, or the `x-api-key` that Anthropic SDKs send instead. */
+/** The bucket every credential this task has not validated shares. */
+const UNVALIDATED = 'distinct_credentials';
+
+/** Add to a capped set, evicting the oldest entry once it is full. */
+function track(set: Set<string>, key: string, cap: number): void {
+  if (set.has(key)) return;
+  for (const oldest of set) {
+    if (set.size < cap) break;
+    set.delete(oldest);
+  }
+  set.add(key);
+}
+
+/** The 429 for a spent allowance, after stopping the unread upload body. */
+function refuse(request: Request, headers: Headers, result: RateLimitResult): Response {
+  // A refusal must also stop the upload: an unread body is still buffered.
+  request.body?.cancel().catch(() => {});
+  const retryAfterSeconds = Math.max(1, Math.ceil((result.retryAfterMs ?? result.resetMs) / 1000));
+  const response = rateLimitedResponse(new URL(request.url).pathname, retryAfterSeconds);
+  headers.forEach((value, name) => response.headers.set(name, value));
+  return response;
+}
+
+/** The credential the request carries, as its bucket key, or null when it carries none. */
 function credentialOf(request: Request): string | null {
   const bearer = /^Bearer\s+(\S+)$/i.exec((request.headers.get('authorization') ?? '').trim())?.[1];
-  return bearer || request.headers.get('x-api-key')?.trim() || null;
+  const credential = bearer || request.headers.get('x-api-key')?.trim();
+  return credential ? hashOf(credential) : null;
+}
+
+function hashOf(credential: string): string {
+  return createHash('sha256').update(credential).digest('hex');
 }
 
 const MESSAGE = 'Too many requests for this credential. Retry shortly.';
@@ -51,10 +109,13 @@ const MESSAGE = 'Too many requests for this credential. Retry shortly.';
 /** A 429 in the envelope of the route's protocol: Anthropic for Messages and Claude Code, OpenAI otherwise. */
 function rateLimitedResponse(path: string, retryAfterSeconds: number): Response {
   if (path.endsWith('/messages') || path.includes('/claude-code/')) {
-    return new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: MESSAGE } }), {
-      status: 429,
-      headers: { 'content-type': 'application/json', 'retry-after': String(retryAfterSeconds) },
-    });
+    return new Response(
+      JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: MESSAGE } }),
+      {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': String(retryAfterSeconds) },
+      },
+    );
   }
   return gatewayErrorResponse(429, {
     message: MESSAGE,

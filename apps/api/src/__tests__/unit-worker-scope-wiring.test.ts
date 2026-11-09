@@ -59,6 +59,8 @@ const WORKERS: Record<string, string> = {
   'session-lifecycle': 'projects/session-lifecycle/drain.ts',
   'tunnel-cleanup': 'worker/jobs/tunnel-cleanup.ts',
   'tunnel-forward-expiry': 'worker/jobs/tunnel-forward-expiry.ts',
+  'workspace-split': 'worker/jobs/workspace-split.ts',
+  'workspace-id-fill': 'worker/jobs/workspace-id-fill.ts',
   'tunnel-rpc-forwarder': 'tunnel/core/cluster-forwarder.ts',
   'billing-trial-expiry': 'worker/jobs/billing-rotation.ts',
   'billing-yearly-rotation': 'worker/jobs/billing-rotation.ts',
@@ -121,7 +123,6 @@ const NOT_WORKERS: Record<string, string> = {
   'replica/teams-bot-token-refresh.ts': 'refreshes the in-memory Teams bot token',
   'replica/tmp-reaper.ts': 'deletes stale local tmp directories; no database writes',
   'replica/tunnel.ts': "clears this process's in-memory tunnel rate-limit buckets",
-  'worker/jobs/app-deployment.ts': 'timer that calls triggerAppDeploymentWorker, which wraps itself',
   'worker/runtime/heartbeat.ts': 'reports the in-memory tick times as one stdout line; no database writes',
 };
 

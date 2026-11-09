@@ -24,8 +24,8 @@ its config from `kortix.yaml` and the files it names.
 | `show` | Shows a file, an image, a URL or content to the user. | `show` |
 
 - The three web tools (`web_search`, `image_search`, `scrape_webpage`) bill
-  the project. No key is needed in the sandbox.
-- Project tools from `tools:` run like the Kortix tools (`kortix/tools.md`).
+  the workspace. No key is needed in the sandbox.
+- Workspace tools from `tools:` run like the Kortix tools (`kortix/tools.md`).
 - `agents.<name>.codemode`: `on` (default), `only` (the model sees only
   `codemode`), `off`. A script cannot call `agent` or `question`.
 - Not on pi: `webfetch`, `websearch`, `todowrite`, `lsp`, `apply_patch`,
@@ -80,6 +80,10 @@ Arguments: `description`, `prompt`, `subagent_type` (a declared agent) or
 - A subagent runs with its own prompt, model and permission. A call must
   pass both the subagent's rules and the caller's: a `deny` from either wins.
   A child never gets a tool its caller lacks.
+- An inline agent runs as the caller's own agent, with the caller's access:
+  its grant, connectors, secrets, computer type and the channel the caller's
+  chat came from. Its `instructions` are its whole system prompt (at most
+  4,096 characters in a separate session).
 - `session: "separate"` (the default) runs the subagent in its own new
   session with its own sandbox and branch. The one call waits until that
   session finishes (up to 30 minutes) and returns its final message: ask the
@@ -111,7 +115,7 @@ Arguments: `description`, `prompt`, `subagent_type` (a declared agent) or
 
 An extension adds tools, hooks or commands. pi runs packages from
 https://pi.dev/packages unmodified. A tool that takes arguments and returns
-text needs no extension: write a project tool (`kortix/tools.md`).
+text needs no extension: write a workspace tool (`kortix/tools.md`).
 
 ```yaml
 extensions:

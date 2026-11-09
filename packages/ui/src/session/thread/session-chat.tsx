@@ -515,7 +515,7 @@ export function SessionChat({
   // only the visible tab may be treated as "active" — otherwise every busy
   // session would react to global shortcuts (ESC-to-stop, auto question
   // handling) at the same time. The standalone project session route
-  // (/projects/[id]/sessions/[sessionId]) mounts a single SessionChat whose id
+  // (/workspaces/[id]/sessions/[sessionId]) mounts a single SessionChat whose id
   // is never registered in this tab store; there it's the only chat mounted, so
   // it's always active.
   //
@@ -1951,6 +1951,22 @@ export function SessionChat({
       }
     };
   }, []);
+  // The composer locks into answer mode exactly while the docked question can
+  // still be answered: a LIVE question (the runtime holds the turn on it) or a
+  // PARKED ask (decided here through the asks API). The old gate was
+  // `renderedQuestion && isBusy`, and it dropped the lock exactly when it
+  // mattered: a parked ask docks on an idle session — the ask no longer holds
+  // the turn — so a typed answer left as a new prompt while the question card
+  // stayed open (KRTX-4450). A question in neither list is one just answered,
+  // held only for its fade-out: unlocked, so text typed into the fade is a
+  // message, never a swallowed answer.
+  const questionLock = useMemo(() => {
+    if (!renderedQuestion) return false;
+    return (
+      liveQuestions.some((q) => q.id === renderedQuestion.id) ||
+      parkedAskIdByRequest.has(renderedQuestion.id)
+    );
+  }, [renderedQuestion, liveQuestions, parkedAskIdByRequest]);
   // Quick Queue entries share the turn renderer. The inbox marks their IDs as
   // pending until delivery; a client-minted wire ID does not place a message.
   // Each is the user message `sessionLogPromptMessage` mints for its prompt.
@@ -3852,15 +3868,15 @@ export function SessionChat({
     [local.model],
   );
 
-  // Only the ACCOUNT default is settable from the picker now — it is the one
-  // scope with no screen of its own. The project default lives in the provider
-  // modal's Models tab and the agent default on the agent's detail page, both
-  // of which also SHOW and can CLEAR what is set. See ModelDefaultControls.
+  // The picker's star sets the WORKSPACE default — the project default, since
+  // a workspace is one account and its project (Workspaces, PR 1). An
+  // account-wide default set earlier still applies as the fallback. See
+  // ModelDefaultControls.
   const chatModelDefaultControls: ModelDefaultControls = useMemo(
     () => ({
-      accountDefault: local.model.defaults.accountDefault ?? null,
+      accountDefault: local.model.defaults.projectDefault ?? null,
       onSetAccountDefault: (m) => {
-        void local.model.defaults.setAccountDefault(m);
+        void local.model.defaults.setProjectDefault(m);
       },
     }),
     [local.model.defaults],
@@ -4308,7 +4324,7 @@ export function SessionChat({
       // already resolved client-side, so there is no server data to fetch.
       // Under Next.js `router.replace` would run a COLD RSC FETCH on every
       // open/close of this dialog, on the hottest route in the app (see
-      // app/(app)/projects/[id]/sessions/[sessionId]/page.tsx:1309); Next
+      // app/(app)/workspaces/[id]/sessions/[sessionId]/page.tsx:1309); Next
       // observes `history.replaceState`, which `useUiShallowNavigate` writes
       // when the host router observes history and routes through it otherwise.
       shallowNavigate(qs ? `${pathname}?${qs}` : pathname, { replace: true });
@@ -5196,13 +5212,9 @@ export function SessionChat({
                 onCompactClick={runtimeCanCompact ? handleCompactClick : undefined}
                 quoteRequests={quoteRequests}
                 onQuoteRequestsApplied={handleQuoteRequestsApplied}
-                // Only lock the input into question-answer mode while the session is
-                // actually busy (a live question keeps the run busy). If a question
-                // chip is ever showing while the session is idle — e.g. a dead /
-                // abandoned question the agent left behind — the input stays unlocked
-                // so a typed message is sent to the agent instead of being swallowed
-                // as a custom answer.
-                lockForQuestion={!!renderedQuestion && isBusy}
+                // Locks while the docked question is answerable — a live
+                // question or a parked ask — see `questionLock` above.
+                lockForQuestion={questionLock}
                 // Same dead-prompt guard as questions: only lock while the agent is
                 // actually paused on the decision (isBusy), so a stale card can't
                 // swallow the composer on an idle session.

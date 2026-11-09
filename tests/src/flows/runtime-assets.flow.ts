@@ -21,7 +21,7 @@ import type { CreatedProject, FlowContext } from '../core/types';
 async function createProjectPat(ctx: FlowContext, label: string) {
   const project = await ctx.fixtures.project();
   const response = await ctx.client.as(ctx.P.OWNER).post(
-    '/v1/projects/:projectId/cli-token',
+    '/v1/workspaces/:projectId/cli-token',
     { name: ctx.fixtures.name(label) },
     { params: { projectId: project.id } },
   );
@@ -42,7 +42,7 @@ flow(
       'GET /v1/runtime-assets/manifest',
       'GET /v1/runtime-assets/agent',
       'HEAD /v1/runtime-assets/agent',
-      'POST /v1/projects/:projectId/cli-token',
+      'POST /v1/workspaces/:projectId/cli-token',
     ],
   },
   async (ctx) => {
@@ -162,7 +162,7 @@ flow(
     routes: [
       'GET /v1/runtime-assets/managed-skills',
       'GET /v1/runtime-assets/manifest',
-      'POST /v1/projects/:projectId/cli-token',
+      'POST /v1/workspaces/:projectId/cli-token',
     ],
   },
   async (ctx) => {
@@ -233,7 +233,7 @@ flow(
       'GET /v1/runtime-assets/cli',
       'HEAD /v1/runtime-assets/cli',
       'GET /v1/runtime-assets/manifest',
-      'POST /v1/projects/:projectId/cli-token',
+      'POST /v1/workspaces/:projectId/cli-token',
     ],
   },
   async (ctx) => {
@@ -305,7 +305,7 @@ flow(
       'GET /v1/runtime-assets/entrypoint',
       'HEAD /v1/runtime-assets/entrypoint',
       'GET /v1/runtime-assets/manifest',
-      'POST /v1/projects/:projectId/cli-token',
+      'POST /v1/workspaces/:projectId/cli-token',
     ],
   },
   async (ctx) => {
@@ -465,7 +465,7 @@ async function bootBox(ctx: FlowContext, project: CreatedProject): Promise<Boote
       async () => {
         const r = await ctx.client
           .as(ctx.P.OWNER)
-          .post('/v1/projects/:projectId/sessions/:sessionId/start', {}, {
+          .post('/v1/workspaces/:projectId/sessions/:sessionId/start', {}, {
             params: { projectId: project.id, sessionId: session.id },
             query: { wait_ms: '8000' },
             timeoutMs: 25_000,
@@ -561,7 +561,7 @@ flow(
     // can run in every preview — which is the only place a real box exists.
     requires: ['database', 'sandbox'],
     timeoutMs: 900_000,
-    routes: ['GET /v1/runtime-assets/manifest', 'POST /v1/projects/:projectId/sessions/:sessionId/start'],
+    routes: ['GET /v1/runtime-assets/manifest', 'POST /v1/workspaces/:projectId/sessions/:sessionId/start'],
   },
   async (ctx) => {
     // `seed: true`: a database-only project's `repo_url` cannot be cloned by a
@@ -620,7 +620,7 @@ flow(
     // `funded`: every step below runs a real model turn. Operator-run.
     requires: ['database', 'funded', 'sandbox'],
     timeoutMs: 1_200_000,
-    routes: ['GET /v1/runtime-assets/manifest', 'POST /v1/projects/:projectId/sessions/:sessionId/start'],
+    routes: ['GET /v1/runtime-assets/manifest', 'POST /v1/workspaces/:projectId/sessions/:sessionId/start'],
   },
   async (ctx) => {
     // `seed: true`: same reason as RTA-5 — `bootBox` needs a real, clonable repo.
@@ -745,7 +745,7 @@ flow(
       'GET /v1/runtime-assets/chunk/:sha256',
       'GET /v1/runtime-assets/chunks/:component',
       'GET /v1/runtime-assets/manifest',
-      'POST /v1/projects/:projectId/cli-token',
+      'POST /v1/workspaces/:projectId/cli-token',
     ],
   },
   async (ctx) => {
@@ -816,7 +816,7 @@ flow(
     // reasoning that ~90 MB of each is the same embedded Bun runtime. That is
     // true of two binaries compiled by the SAME Bun and false of what we ship:
     // `apps/api/Dockerfile` builds the daemon on `SANDBOX_AGENT_BUN_VERSION`
-    // (1.3.11, a deliberate pin) and the CLI on `BUN_VERSION` (1.4.3), so they
+    // (1.3.11, a deliberate pin) and the CLI on `BUN_VERSION` (1.4.4), so they
     // embed different runtimes. Measured on a deployed preview: 0 of 111 chunks
     // shared, first MiB already different. Requiring overlap would have pinned a
     // build coincidence rather than a contract — and would go red on a green

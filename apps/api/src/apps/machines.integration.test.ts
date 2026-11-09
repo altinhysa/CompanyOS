@@ -70,6 +70,24 @@ mock.module('../billing/services/compute-metering', () => ({
 const { db } = await import('../shared/db');
 const { AppHostingProvider } = await import('./hosting');
 const machines = await import('./machines');
+
+// `setAppScale` fires its reconcile detached (`void reconcileAppMachines`).
+// Left alone, one outlives the test, and its `app_runtimes` updates cross the
+// cleanup's cascading deletes in the opposite row order — Postgres 40P01
+// deadlock (release gate run 42716922285, core-db lane). The mock keeps the
+// real function and remembers every fired reconcile so afterEach can drain
+// them before the cleanup touches the same rows.
+const realMachines = machines;
+const pendingReconciles: Array<Promise<unknown>> = [];
+mock.module('./machines', () => ({
+  ...realMachines,
+  reconcileAppMachines: (...args: Parameters<typeof realMachines.reconcileAppMachines>) => {
+    const run = realMachines.reconcileAppMachines(...args);
+    pendingReconciles.push(run.catch(() => {}));
+    return run;
+  },
+}));
+
 const volumes = await import('./volumes');
 const fleet = await import('./fleet');
 
@@ -151,7 +169,12 @@ withDb('machines and volumes — real PostgreSQL', () => {
     failReadyFor = new Set();
     await cleanup();
   });
-  afterEach(cleanup);
+  afterEach(async () => {
+  // Drain every detached reconcile setAppScale fired, so nothing writes to
+  // `app_runtimes` while the cleanup's cascade deletes them.
+  await Promise.allSettled(pendingReconciles.splice(0));
+  await cleanup();
+});
 
   test('bluegreen, two machines: the new release keeps both machine ids, all are healthy before traffic moves, then the old instances go', async () => {
     await seedApp({ app: 2 });

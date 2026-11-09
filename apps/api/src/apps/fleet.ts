@@ -141,6 +141,23 @@ export async function destroyMachine(app: AppRow, machineId: string, hosting = n
  * gets its own, empty volume: the machines then serve different data behind
  * one URL, which splits a database (Convex, Postgres, SQLite) in two.
  */
+/**
+ * The reconciles `setAppScale` fires in the background (the API answers
+ * before the machines converge). Tests that touch scale drain this between
+ * cases: a reconcile still holding row locks when the next test's cleanup
+ * deletes the same rows deadlocks the two transactions
+ * (machines.integration.test.ts under CI load, 2026-11-09).
+ */
+// replica-local: a best-effort drain seam for tests — prod never calls the drain, and a reconcile it misses still runs to completion on its own replica, unchanged.
+const scaleReconcilesInFlight = new Set<Promise<unknown>>();
+
+/** Resolves when every background scale reconcile has settled. */
+export async function drainScaleReconciles(): Promise<void> {
+  while (scaleReconcilesInFlight.size > 0) {
+    await Promise.allSettled([...scaleReconcilesInFlight]);
+  }
+}
+
 export async function setAppScale(
   app: AppRow,
   counts: Record<string, number>,
@@ -167,9 +184,11 @@ export async function setAppScale(
   }
   const scale = { ...(app.scale as Record<string, number>), ...counts };
   await db.update(apps).set({ scale, updatedAt: new Date() }).where(eq(apps.appId, app.appId));
-  void reconcileAppMachines(app.appId).catch((error) => {
+  const reconcile = reconcileAppMachines(app.appId).catch((error) => {
     logger.error('[apps] scale reconcile failed', { appId: app.appId, error: String(error) });
   });
+  scaleReconcilesInFlight.add(reconcile);
+  void reconcile.finally(() => scaleReconcilesInFlight.delete(reconcile));
   return scale;
 }
 

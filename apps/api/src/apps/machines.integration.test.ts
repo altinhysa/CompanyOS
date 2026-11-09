@@ -35,6 +35,9 @@ mock.module('./hosting', () => ({
     }
     async stop(_provider: string, externalId: string) { calls.push(`stop ${externalId}`); }
     async start(_provider: string, externalId: string) { calls.push(`start ${externalId}`); }
+    // The reconcile's error-cleanup path removes a box it already created
+    // (machines.ts, the `.returning().catch` of the instance insert).
+    async remove(_provider: string, externalId: string) { calls.push(`remove ${externalId}`); }
   },
 }));
 const realProviders = await import('../platform/providers');
@@ -151,7 +154,13 @@ withDb('machines and volumes — real PostgreSQL', () => {
     failReadyFor = new Set();
     await cleanup();
   });
-  afterEach(cleanup);
+  // Drain the background scale reconciles BEFORE the rows go: a reconcile
+  // still holding row locks when cleanup deletes the same rows deadlocks the
+  // two transactions and fails the next case (CI load, 2026-11-09).
+  afterEach(async () => {
+    await fleet.drainScaleReconciles();
+    await cleanup();
+  });
 
   test('bluegreen, two machines: the new release keeps both machine ids, all are healthy before traffic moves, then the old instances go', async () => {
     await seedApp({ app: 2 });

@@ -5,6 +5,7 @@ import { AgentMark } from '@kortix/ui/internal/components/agent-mark';
 import { DitherTextureShader } from '@kortix/ui/wallpaper-shaders';
 import { HOME_GREETINGS, spaceBefore } from '@kortix/ui/workspace/home/home-greeting';
 import { ArrowUpIcon, CaretDownIcon, CaretUpDownIcon, GearSixIcon, PaperclipIcon } from '@phosphor-icons/react';
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 import { useTranslations } from '@/i18n/use-translations';
 
@@ -12,8 +13,9 @@ import { useTranslations } from '@/i18n/use-translations';
  * The right half of `/workspaces` and `/workspaces/new`: a blue field with a
  * window that shows the workspace being made as the person will first see
  * it, the project home: the sidebar's workspace button over the Sessions
- * list, and the home's greeting over the composer, centered in the part of
- * the window that shows. Only the name the person types is live; what a new
+ * list, and the home's greeting over the composer. The home is laid out at
+ * the app's own proportions and scaled down as one picture, so it never
+ * reflows into a cramped copy of itself. Only the name the person types is live; what a new
  * workspace does not have yet (sessions, the prompt, the model) is drawn as
  * skeleton bars.
  *
@@ -38,7 +40,26 @@ const FIELD_BACKGROUND = [
 const GREETING = HOME_GREETINGS[1];
 
 /** The Sessions list: skeleton titles at uneven lengths, as real titles are. */
-const SESSION_WIDTHS = ['w-28', 'w-24', 'w-32', 'w-20', 'w-28', 'w-16', 'w-24', 'w-32', 'w-20'];
+const SESSION_WIDTHS = ['w-40', 'w-32', 'w-44', 'w-28', 'w-36', 'w-24', 'w-40', 'w-44', 'w-28', 'w-36', 'w-32', 'w-40', 'w-24', 'w-36', 'w-44', 'w-28'];
+
+/** The width the project home is laid out at before it is scaled to the box. */
+const DESIGN_WIDTH = 960;
+
+/** The box's size, kept current as the window resizes. Null before the first measure. */
+function useBoxSize(ref: RefObject<HTMLDivElement | null>) {
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (width > 0) setSize({ width, height });
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
+}
 
 function Bar({ className }: { className: string }) {
   return <span className={`bg-muted block h-2 rounded-full ${className}`} />;
@@ -46,6 +67,8 @@ function Bar({ className }: { className: string }) {
 
 export function WorkspacePreviewArt({ name }: { name: string | null }) {
   const t = useTranslations('sidebar');
+  const boxRef = useRef<HTMLDivElement>(null);
+  const box = useBoxSize(boxRef);
   const label = name?.trim() ?? '';
   return (
     <div
@@ -62,52 +85,70 @@ export function WorkspacePreviewArt({ name }: { name: string | null }) {
           both sides, and bleeds off the bottom edge: the top of the product,
           not a framed screenshot. The fixed inset keeps the field an even
           frame at every window size. */}
-      <div className="bg-background border-foreground/10 absolute top-12 right-12 -bottom-px left-12 flex overflow-hidden rounded-t-md border-x border-t shadow-xl">
-        <div className="bg-sidebar border-border flex w-44 shrink-0 flex-col gap-1 border-r p-2 xl:w-52">
-          {/* The sidebar's workspace button, the full width of the sidebar. */}
-          <div className="flex h-9 items-center gap-2 px-1">
-            {label ? (
-              <EntityAvatar label={label} size="sm" />
-            ) : (
-              <span className="bg-muted size-6 shrink-0 rounded-sm" />
-            )}
-            <span className="text-foreground min-w-0 flex-1 truncate text-sm font-medium tracking-tight">{label}</span>
-            <CaretUpDownIcon className="text-muted-foreground size-3.5 shrink-0" />
+      <div
+        ref={boxRef}
+        className="bg-background border-foreground/10 absolute top-12 right-12 -bottom-px left-12 overflow-hidden rounded-t-md border-x border-t shadow-xl"
+      >
+        {/* The project home at the app's own proportions (a DESIGN_WIDTH-wide
+            window), scaled as one picture to the box: nothing reflows, so the
+            sidebar, the greeting and the composer keep the real layout at
+            every size. Hidden until the box is measured. */}
+        <div
+          className="flex origin-top-left"
+          style={{
+            width: DESIGN_WIDTH,
+            height: box ? box.height / (box.width / DESIGN_WIDTH) : 0,
+            transform: box ? `scale(${box.width / DESIGN_WIDTH})` : undefined,
+            visibility: box ? 'visible' : 'hidden',
+          }}
+        >
+          <div className="bg-sidebar border-border flex w-[240px] shrink-0 flex-col gap-1 border-r p-2">
+            {/* The sidebar's workspace button, the full width of the sidebar. */}
+            <div className="flex h-9 items-center gap-2 px-1">
+              {label ? (
+                <EntityAvatar label={label} size="sm" />
+              ) : (
+                <span className="bg-muted size-6 shrink-0 rounded-sm" />
+              )}
+              <span className="text-foreground min-w-0 flex-1 truncate text-sm font-medium tracking-tight">{label}</span>
+              <CaretUpDownIcon className="text-muted-foreground size-3.5 shrink-0" />
+            </div>
+
+            <span className="text-muted-foreground mt-3 px-2 pb-1 text-sm">{t('sessions')}</span>
+            <div className="flex flex-col">
+              {SESSION_WIDTHS.map((width, index) => (
+                <div key={index} className="flex h-8 items-center gap-2 px-2">
+                  <span className="border-muted-foreground/40 size-3.5 shrink-0 rounded-full border" />
+                  <Bar className={width} />
+                </div>
+              ))}
+            </div>
           </div>
 
-          <span className="text-muted-foreground mt-3 px-2 pb-1 text-sm">{t('sessions')}</span>
-          <div className="flex flex-col">
-            {SESSION_WIDTHS.map((width, index) => (
-              <div key={index} className="flex h-8 items-center gap-2 px-2">
-                <span className="border-muted-foreground/40 size-3.5 shrink-0 rounded-full border" />
-                <Bar className={width} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* The project home: the greeting over the composer. */}
-        <div className="flex min-w-0 flex-1 flex-col items-center justify-center px-6 xl:px-8">
-          <div className="flex w-full max-w-md min-w-0 flex-col gap-4">
-            <p className="text-muted-foreground text-xl tracking-tight text-balance">
-              {GREETING.before} <span className="text-foreground">{label}</span>
-              {spaceBefore(GREETING.after) ? ' ' : ''}
-              {GREETING.after}
-            </p>
-            <div className="border-border bg-background flex flex-col gap-8 rounded-xl border p-3">
-              <Bar className="mt-1 ml-1 w-40" />
-              <div className="flex items-center gap-3">
-                <PaperclipIcon className="text-muted-foreground size-4 shrink-0" />
-                <span className="text-foreground flex shrink-0 items-center gap-1.5 text-sm">
-                  <AgentMark slug="kortix" />
-                  Kortix
-                  <CaretDownIcon className="text-muted-foreground size-3 shrink-0" />
-                </span>
-                <Bar className="hidden w-16 xl:block" />
-                <GearSixIcon className="text-muted-foreground ml-auto size-4 shrink-0" />
-                <span className="bg-muted-foreground text-background flex size-7 shrink-0 items-center justify-center rounded-full">
-                  <ArrowUpIcon className="size-3.5" />
-                </span>
+          {/* The project home: the greeting over the composer, centered as
+              the real home centers them. */}
+          <div className="flex min-w-0 flex-1 flex-col items-center justify-center px-10">
+            <div className="flex w-full max-w-[560px] flex-col gap-4">
+              <p className="text-muted-foreground text-2xl tracking-tight">
+                {GREETING.before} <span className="text-foreground">{label}</span>
+                {spaceBefore(GREETING.after) ? ' ' : ''}
+                {GREETING.after}
+              </p>
+              <div className="border-border bg-background flex flex-col gap-8 rounded-2xl border p-3">
+                <Bar className="mt-1 ml-1 w-56" />
+                <div className="flex items-center gap-3">
+                  <PaperclipIcon className="text-muted-foreground size-4 shrink-0" />
+                  <span className="text-foreground flex shrink-0 items-center gap-1.5 text-sm">
+                    <AgentMark slug="kortix" />
+                    Kortix
+                    <CaretDownIcon className="text-muted-foreground size-3 shrink-0" />
+                  </span>
+                  <Bar className="w-24" />
+                  <GearSixIcon className="text-muted-foreground ml-auto size-4 shrink-0" />
+                  <span className="bg-muted-foreground text-background flex size-7 shrink-0 items-center justify-center rounded-full">
+                    <ArrowUpIcon className="size-3.5" />
+                  </span>
+                </div>
               </div>
             </div>
           </div>

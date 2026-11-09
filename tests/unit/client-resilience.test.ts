@@ -208,6 +208,69 @@ describe('transient circuit breaker (P3.2)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The API's OWN typed retryable 503 (`git_mirror_unavailable`) — release
+// train 2026-11-08, run 42666114535. The deployed smoke's warmup session
+// create answered 503 Retry-After:10 code=git_mirror_unavailable (a managed
+// repo provisioned seconds earlier was momentarily invisible to its clone
+// credential), and the harness asserted it as a contract failure instead of
+// honoring the API's published retry contract.
+// ---------------------------------------------------------------------------
+
+describe('app transient git_mirror_unavailable', () => {
+  const transientBody = {
+    error: true,
+    code: 'git_mirror_unavailable',
+    message: 'git mirror is temporarily unavailable',
+    status: 503,
+  };
+
+  function appTransient503(
+    headers: Record<string, string> = { 'retry-after': '10', 'x-request-id': 'req-1' },
+  ): Res {
+    return new Res({
+      routeTemplate: 'POST /v1/projects/:projectId/sessions',
+      req: { method: 'POST', url: 'https://example.test/v1/projects/p/sessions', headers: {} },
+      res: { status: 503, headers, bodyText: JSON.stringify(transientBody), json: transientBody },
+      ms: 1,
+    });
+  }
+
+  it('marks the typed 503 retryable in status(), x-request-id and all', () => {
+    let error: unknown;
+    try {
+      appTransient503().status(201);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isKe2eRetryableError(error)).toBe(true);
+  });
+
+  it('keeps asserting a plain application 503 without the typed code', () => {
+    const plain = new Res({
+      routeTemplate: 'POST /v1/projects/:projectId/sessions',
+      req: { method: 'POST', url: 'https://example.test/v1/projects/p/sessions', headers: {} },
+      res: {
+        status: 503,
+        headers: { 'x-request-id': 'req-1' },
+        bodyText: JSON.stringify({ error: true, message: 'boom', status: 503 }),
+        json: { error: true, message: 'boom', status: 503 },
+      },
+      ms: 1,
+    });
+
+    let error: unknown;
+    try {
+      plain.status(201);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isKe2eRetryableError(error)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // P3.3 — name the edge response instead of guessing at it.
 // ---------------------------------------------------------------------------
 

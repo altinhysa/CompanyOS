@@ -161,6 +161,16 @@ export class Res {
       (error as any).ke2eRetryAfterMs = retryAfterMs(this.header('retry-after'));
       throw error;
     }
+    if (!codes.includes(this.statusCode) && isKe2eAppTransientResponse(this)) {
+      const breakerOpen = transientBreaker.isOpen();
+      const error = new Error(
+        `app ${GIT_MIRROR_UNAVAILABLE}; expected [${codes.join(', ')}] — transient status ${this.statusCode}` +
+          (breakerOpen ? ` — ${transientBreaker.describe()}` : ''),
+      );
+      (error as any).ke2eRetryable = !breakerOpen;
+      (error as any).ke2eRetryAfterMs = retryAfterMs(this.header('retry-after'));
+      throw error;
+    }
     assert({
       kind: 'status',
       description: `status in [${codes.join(', ')}]`,
@@ -217,6 +227,31 @@ export function isKe2eTransientGatewayResponse(response: Res): boolean {
     response.header('retry-after') !== undefined ||
     response.header('content-type')?.includes('text/html') === true
   );
+}
+
+/** The API's stable code for its own expected, retryable mirror degradation
+ *  (`apps/api/src/projects/git/mirror.ts` `GIT_MIRROR_UNAVAILABLE_CODE`). */
+const GIT_MIRROR_UNAVAILABLE = 'git_mirror_unavailable';
+
+/**
+ * Detect the API's OWN typed, retryable degradation.
+ *
+ * The origin answered deliberately with `Retry-After` and the stable
+ * `git_mirror_unavailable` code: the project git mirror could not be read for
+ * a moment — most often a managed repo provisioned seconds earlier whose
+ * clone credential has not propagated yet, the exact class
+ * `isTransientGitMirrorError` documents as expected-and-retryable (incident
+ * `incident-20260923T100537Z-hbcr`). The origin did not commit a write (a
+ * failed session create finalizes its command as failed — no session row), so
+ * the flow-level budget may re-run against fresh fixtures without a
+ * duplicate-write risk. Unlike the edge-laundered 5xx, `x-request-id` proves
+ * nothing bad here: the header rides the API's own retryable 503.
+ */
+export function isKe2eAppTransientResponse(response: Res): boolean {
+  if (response.statusCode !== 503) return false;
+  if (response.header('retry-after') === undefined) return false;
+  const code = (response.captured.res.json as { code?: unknown } | null | undefined)?.code;
+  return code === GIT_MIRROR_UNAVAILABLE;
 }
 
 /**

@@ -35,6 +35,8 @@ mock.module('./hosting', () => ({
     }
     async stop(_provider: string, externalId: string) { calls.push(`stop ${externalId}`); }
     async start(_provider: string, externalId: string) { calls.push(`start ${externalId}`); }
+    // createInstance's insert-failure path calls this to release a refused box.
+    async remove(_provider: string, externalId: string) { calls.push(`remove ${externalId}`); }
   },
 }));
 const realProviders = await import('../platform/providers');

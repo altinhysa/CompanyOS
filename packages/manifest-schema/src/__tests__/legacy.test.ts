@@ -180,6 +180,28 @@ describe('a kortix_version 2 project', () => {
     expect(validateManifest(raw).issues).toEqual([expect.objectContaining({ path: 'agents.helper.descripton', severity: 'error', message: expect.stringContaining('Did you mean "description"?') })]);
   });
 
+  test('an agent v2 gave the repository (the key omitted, true or branch) gets workspace.gitops.read; false and runtime get nothing', () => {
+    const text = [
+      'kortix_version: 2',
+      'agents:',
+      '  omitted:\n    prompt: a\n    kortix_cli: none',
+      '  yes:\n    prompt: b\n    repository_access: true\n    kortix_cli: [project.read]',
+      '  branch:\n    prompt: c\n    workspace: branch',
+      '  every:\n    prompt: d\n    kortix_cli: all',
+      '  no:\n    prompt: e\n    repository_access: false',
+      '  runtime:\n    prompt: f\n    workspace: runtime',
+      '',
+    ].join('\n');
+    const { raw } = convertLegacyManifest(parseManifestText(text), 2, 'kortix.yaml', repo({}));
+    const grant = (name: string) => (raw.agents as Record<string, Record<string, unknown>>)[name]!.kortix_permissions;
+    expect(grant('omitted')).toEqual(['workspace.gitops.read']);
+    expect(grant('yes')).toEqual(['project.read', 'workspace.gitops.read']);
+    expect(grant('branch')).toEqual(['workspace.gitops.read']);
+    expect(grant('every')).toBe('*');
+    expect(grant('no')).toBeUndefined();
+    expect(grant('runtime')).toBeUndefined();
+  });
+
   test('an unknown agent key is an error that leaves the agent on; a runtime table is dropped with a note', () => {
     const text = 'kortix_version: 2\nruntime:\n  root: .opencode\nagents:\n  helper:\n    prompt: You help.\n    excluded_skills: [pdf]\n';
     const { raw, dropped } = convertLegacyManifest(parseManifestText(text), 2, 'kortix.yaml', repo({}));

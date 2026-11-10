@@ -10,15 +10,17 @@
  *
  * ACCURACY GATE for this page specifically:
  *  - INVENT NOTHING about employment. No salary band, no equity percentage,
- *    no benefits, no headcount, no remote policy. Compensation is named only
+ *    no benefits, no headcount, no remote-work terms beyond the word
+ *    "Remote" on a location. Compensation is named only
  *    as its parts (base, variable, founding equity): the founder has not
- *    published numbers. Locations are per opening and come from the founder:
- *    FDE and MTS in **Belgrade** or **San Francisco**, both founding GTM roles
- *    in **San Francisco** or **New York**, in person (2026-11-10).
- *  - The openings are the founder's own list: FDE, two founding GTM roles
- *    (Enterprise, Developers and PLG; 2026-11-10) and MTS. FDE and MTS stay one
- *    broad line. The GTM role pages carry the founder-approved spec; the title
- *    is open (Founding GTM Lead, Head of GTM, Head of Business, CBO).
+ *    published numbers. Locations are per opening and come from the founder
+ *    (2026-11-10): MTS and FDE in **Belgrade, Serbia** or **Remote**; both
+ *    founding GTM roles in the **US**, New York or San Francisco, in person.
+ *  - The openings are the founder's own list and order: Founding GTM
+ *    (Enterprise), Founding GTM (Developers), MTS, FDE. The board shows the
+ *    role and its location only, no summary line. The GTM role pages carry
+ *    the spec; the title is open (Founding GTM Lead, Head of GTM, Head of
+ *    Business, CBO).
  *  - "How we sell" is the public half of the GTM thesis. No internal numbers.
  *  - Applications go through `ApplyModal`, which posts to the same
  *    `/api/demo-request` pipeline as "Book your demo". There is no ATS and no
@@ -33,15 +35,15 @@
  *  - No culture-page filler. If a sentence restates the one above it, cut it.
  */
 
-const BUILD_CITIES = 'Belgrade · San Francisco';
-const GTM_CITIES = 'San Francisco · New York';
+const TECH_LOCATION = 'Belgrade, Serbia · Remote';
+const GTM_LOCATION = 'US · New York or San Francisco';
 
 export const hero = {
   title: 'Open positions.',
-  lead: 'Belgrade, San Francisco and New York.',
-  description: 'An extremely small, talent-dense team. Each opening names its cities.',
+  lead: 'Belgrade, New York, San Francisco or remote.',
+  description: 'An extremely small, talent-dense team.',
   roleLabel: 'Role',
-  summaryLabel: 'Summary',
+  locationLabel: 'Location',
   ctaPrimary: 'Apply',
   ctaSecondary: 'Why Kortix exists',
   ctaSecondaryHref: '/about',
@@ -53,52 +55,47 @@ export const hero = {
 export const ROLE_SLUGS = ['gtm-enterprise', 'gtm-developers'] as const;
 export type RoleSlug = (typeof ROLE_SLUGS)[number];
 
-/** The board: the role, its full name, one line and its cities. FDE and MTS stay broad; a GTM
- *  row links to its role page. */
+/** The board: the role, its full name and its location, in the founder's order. No summary line
+ *  (founder, 2026-11-10). A GTM row links to its role page. */
 export const openings: readonly {
   id: string;
   name: string;
   full: string;
-  summary: string;
-  cities: string;
+  location: string;
   href?: `/careers/${RoleSlug}`;
 }[] = [
-  {
-    id: 'fde',
-    name: 'FDE',
-    full: 'Forward Deployed Engineer',
-    summary: 'Work with customers to put Kortix to work across their company.',
-    cities: BUILD_CITIES,
-  },
   {
     id: 'gtm-enterprise',
     name: 'Founding GTM',
     full: 'Enterprise',
-    summary: 'Take Kortix from founder-led sales to an enterprise business: sales, consultancy, partners.',
-    cities: GTM_CITIES,
+    location: GTM_LOCATION,
     href: '/careers/gtm-enterprise',
   },
   {
     id: 'gtm-developers',
     name: 'Founding GTM',
-    full: 'Developers and PLG',
-    summary: 'Turn the open-source audience into teams that run real work on Kortix and pay for it.',
-    cities: GTM_CITIES,
+    full: 'Developers',
+    location: GTM_LOCATION,
     href: '/careers/gtm-developers',
   },
   {
     id: 'mts',
     name: 'MTS',
     full: 'Member of Technical Staff',
-    summary: 'Build Kortix itself, anywhere in the stack.',
-    cities: BUILD_CITIES,
+    location: TECH_LOCATION,
+  },
+  {
+    id: 'fde',
+    name: 'FDE',
+    full: 'Forward Deployed Engineer',
+    location: TECH_LOCATION,
   },
 ];
 
 /** What every founding GTM role page shows the same way. */
 const gtmFacts = {
   reportsTo: { k: 'Reports to', v: 'Marko Kraemer, CEO' },
-  location: { k: 'Location', v: 'San Francisco or New York, in person' },
+  location: { k: 'Location', v: 'US: New York or San Francisco, in person' },
   pay: { k: 'Compensation', v: 'Base salary, variable pay and founding equity' },
 } as const;
 
@@ -184,7 +181,7 @@ export const roles: Record<RoleSlug, RolePage> = {
   'gtm-enterprise': {
     hero: {
       title: 'Founding GTM, Enterprise.',
-      titleMuted: 'San Francisco or New York.',
+      titleMuted: 'New York or San Francisco.',
       sub: 'The first go-to-market hire for the companies that must own their AI. You take Kortix from founder-led sales to an enterprise business, and you have done it before.',
     },
     facts: [
@@ -300,13 +297,13 @@ export const roles: Record<RoleSlug, RolePage> = {
     meta: {
       title: 'Founding GTM, Enterprise — Kortix careers',
       description:
-        'The first enterprise go-to-market hire at Kortix: 0 to 1 GTM, enterprise sales, consultancy and partnerships. San Francisco or New York.',
+        'The first enterprise go-to-market hire at Kortix: 0 to 1 GTM, enterprise sales, consultancy and partnerships. New York or San Francisco, US.',
     },
   },
   'gtm-developers': {
     hero: {
       title: 'Founding GTM, Developers.',
-      titleMuted: 'San Francisco or New York.',
+      titleMuted: 'New York or San Francisco.',
       sub: 'You turn the open-source audience into teams that run real work on Kortix and pay for it. Product-led growth and developer relations, in one seat.',
     },
     facts: [
@@ -413,11 +410,11 @@ export const roles: Record<RoleSlug, RolePage> = {
       ],
     },
     process: { title: 'How we hire.', titleMuted: 'About two weeks.', rows: gtmProcess },
-    applyArea: 'Founding GTM — Developers and PLG',
+    applyArea: 'Founding GTM — Developers',
     meta: {
       title: 'Founding GTM, Developers — Kortix careers',
       description:
-        'The first developer and product-led growth hire at Kortix: the funnel, activation, launches and community. San Francisco or New York.',
+        'The first developer and product-led growth hire at Kortix: the funnel, activation, launches and community. New York or San Francisco, US.',
     },
   },
 };
@@ -494,10 +491,10 @@ export const applyForm = {
   areaLabel: 'Which opening',
   areaPlaceholder: 'Pick the closest one',
   areaOptions: [
-    'FDE — Forward Deployed Engineer',
     'Founding GTM — Enterprise',
-    'Founding GTM — Developers and PLG',
+    'Founding GTM — Developers',
     'MTS — Member of Technical Staff',
+    'FDE — Forward Deployed Engineer',
     'Not sure — read it and tell me',
   ],
   nameLabel: 'Name',

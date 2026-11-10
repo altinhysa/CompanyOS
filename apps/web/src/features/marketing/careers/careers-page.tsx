@@ -13,9 +13,9 @@ type CareersContent = ReturnType<typeof getLocalizedCareersContent>;
 
 /**
  * The board, in a band (after Linear's and Runway's open-roles lists on
- * Mobbin): one row per opening with the role and its full name, one line, its
- * cities and one action. A row with a role page links to it ("View role");
- * the rest open Apply directly.
+ * Mobbin): one row per opening with the role, its full name, its location and
+ * one action. A row with a role page links to it ("View role"); the rest open
+ * Apply directly.
  */
 function Board({
   hero,
@@ -27,13 +27,13 @@ function Board({
     <Band>
       <div className="px-6 lg:px-11">
         <div aria-hidden className="text-muted-foreground hidden grid-cols-12 border-b py-4 text-sm lg:grid">
-          <span className="col-span-4 pr-8">{hero.roleLabel}</span>
-          <span className="col-span-5">{hero.summaryLabel}</span>
+          <span className="col-span-6 pr-8">{hero.roleLabel}</span>
+          <span className="col-span-6">{hero.locationLabel}</span>
         </div>
         <ul className="divide-y">
           {openings.map((opening) => (
             <li key={opening.id} className="grid grid-cols-1 items-center gap-y-3 py-6 lg:grid-cols-12">
-              <span className="flex flex-col gap-1 lg:col-span-4 lg:pr-8">
+              <span className="flex flex-col gap-1 lg:col-span-6 lg:pr-8">
                 {opening.href ? (
                   <Link
                     href={opening.href}
@@ -46,11 +46,8 @@ function Board({
                 )}
                 <span className="text-muted-foreground text-sm">{opening.full}</span>
               </span>
-              <span className="text-foreground max-w-xl text-base text-pretty lg:col-span-5 lg:pr-8">
-                {opening.summary}
-              </span>
-              <span className="flex items-center justify-between gap-4 lg:col-span-3 lg:justify-end">
-                <span className="text-muted-foreground text-sm">{opening.cities}</span>
+              <span className="flex items-center justify-between gap-4 lg:col-span-6">
+                <span className="text-foreground text-base">{opening.location}</span>
                 {opening.href ? (
                   <MarketingButton size="md" variant="secondary" className="hit-area-y-1" asChild>
                     <Link href={opening.href}>{hero.viewRole}</Link>

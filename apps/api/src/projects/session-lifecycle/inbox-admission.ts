@@ -79,8 +79,8 @@ export const INBOX_ORDER_MAX_BACKOFF_MS = 2_000;
  * closed without a post (`executeQueuedContinue`: consumed in band, skipped).
  * Prod 2026-10-20: ~200 rows behind parked heads refused 28 times a second.
  * Prod 2026-11-03: 93 cron prompts behind live turns, 29 claims a second.
- * Prod 2026-11-09: 374 rows behind one parked head on the 2 s clock until each
- * passed 64 refusals, and every claim of one wrote two audit rows.
+ * Prod 2026-11-09: 374 rows behind parked heads of one failed session, put
+ * back several times a minute each, and every claim of one wrote two audit rows.
  *
  * The HEAD keeps the short clock. It waits on a parked box after this many
  * refusals (~2 min at the 2 s cap) for a delivery on the wire to finish.
@@ -378,12 +378,11 @@ export const liveInboxAdmissionDeps: InboxAdmissionDeps = {
           ne(sessionLifecycleCommands.commandId, row.commandId),
           // A row BEHIND this one that a drain claimed but that has not passed
           // admission is not on the wire: its own order read sees this row
-          // and refuses it. Counting it let the followers of a parked head
-          // refuse that head (prod 2026-11-09: 374 followers, each claimed
-          // about once a minute, kept the head from its last park for days).
-          // Still in flight: a row past admission (`delivery_started_at`), a
-          // promoted row (it skips the order read), a direct follow-up (it
-          // skips admission), and any row ahead of this one.
+          // and refuses it. Counting it let a busy queue refuse its own head,
+          // and a head refused 64 times on a parked box waits a minute per
+          // refusal. Still in flight: a row past admission
+          // (`delivery_started_at`), a promoted row (it skips the order read),
+          // a direct follow-up (it skips admission), and any row ahead of this one.
           sql`NOT (${inboxFollowsRow(row)}
                    AND NOT (${result} ? 'delivery_started_at')
                    AND COALESCE(${result}->>'promoted', '') <> 'true'
@@ -595,8 +594,8 @@ export async function admitInboxPrompt(
   // A row behind an older prompt cannot go next, on any box. Every exit of the
   // older prompt wakes the next row (`promoteNextInboxRow`: turn end, reaper,
   // dead-letter, removal, a delivery that opens no turn), so the minute is a
-  // fallback for a lost wake. Prod 2026-11-09: 374 rows behind one parked head
-  // re-polled on the short clock until each had passed 64 refusals.
+  // fallback for a lost wake. Prod 2026-11-09: 374 rows behind the parked heads
+  // of one failed session were put back at least once a minute each.
   const behindOlder = !promoted && (await olderRead);
   const behindBackoffMs = Math.max(orderBackoffMs, INBOX_STALE_ORDER_BACKOFF_MS);
 

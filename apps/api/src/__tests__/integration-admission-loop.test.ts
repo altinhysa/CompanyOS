@@ -4,10 +4,11 @@
  *
  * Prod 2026-11-09: one failed session with a stopped box held a head prompt
  * parked on `runtime_unreachable` and 374 prompts behind it. Every follower was
- * claimed and put back about once a minute, and each cycle wrote two
- * `kortix.audit_events` rows and a new TOAST copy of the row's payload. A
- * follower that a drain held in `running` also refused the head as "in
- * flight", so the head rarely reached its third park and never dead-lettered.
+ * claimed and put back several times a minute, and each cycle wrote two
+ * `kortix.audit_events` rows and a new TOAST copy of the row's payload. Each
+ * head then walked the full three-park ladder (~12 min) before the next row
+ * became head, so the queue took days to drain. A follower that a drain held
+ * in `running` also refused the head as "in flight".
  *
  * Every case drives the shipped writers (claim, admission, requeue, park,
  * dead-letter, the drain itself) and reads the rows back.

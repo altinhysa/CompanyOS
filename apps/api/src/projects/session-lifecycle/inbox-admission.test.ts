@@ -117,7 +117,7 @@ describe('admitInboxPrompt', () => {
 
   test('a row behind an older prompt waits a minute from its first refusal, on any box', async () => {
     // Prod 2026-11-09: 374 prompts behind one parked head were claimed and put
-    // back about once a minute each, and each cycle wrote two audit rows and a
+    // back at least once a minute each, and each cycle wrote two audit rows and a
     // new payload copy. Only the head can go next, and every exit of the head
     // wakes the next row (`promoteNextInboxRow`), so a row behind it never
     // needs the short clock.

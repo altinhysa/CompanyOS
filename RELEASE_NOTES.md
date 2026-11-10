@@ -1,0 +1,50 @@
+Workspaces, one model picker, and stateless sandboxes by default
+
+Workspaces, one model picker, and stateless sandboxes by default
+
+### New
+- **Workspaces**: one workspace replaces projects and accounts on every surface (#11857). Customize is now Workspace settings, Review joins the Inbox, and Skills loads without kortix.yaml (#12120). Settings get a drill-down sidebar with deep search and a 7-row workspace menu (#12077). Existing projects and accounts migrate into workspaces automatically.
+- Stateless sandboxes become the default for sessions (#12147).
+- One model picker with favorites, provider tabs and thinking levels (#12116).
+- Connect ChatGPT and Connect Claude on the project home (#12111), behind one shared connect-a-model surface (#12115).
+- Onboarding: a workspace with no runnable agent no longer blocks the chat area, and existing repos get a one-click setup prompt (#12095).
+- Colleagues (My Kortix) get connectors and secrets only after a person allows them (#12149).
+
+### Improved
+- Session logs read faster: kortixd stops digesting the whole log on every poll (#12071) and the API bounds page reads by bytes (#12090).
+- Gateway dashboards and usage series read index-only again (#11719, #12076, #12043).
+- The upgrade modal's plan view matches the /pricing plans band (#12110) and stops scrolling sideways at high credit tiers (#12114).
+- The landing hero drops the four-trait line above the title (#12119).
+- Kortix Cloud no longer offers account branding (#12096).
+- Sandbox diagnostics: the daemon ships its loop lag so slow proxied reads name their cause (#12053), and webhook work that outlives its ack budget is logged (#12099).
+- Web patterns and design-system guidance are standardized across the app (#12031).
+
+### Fixed
+- Billing: a failed Stripe subscription list is rethrown instead of silently reverting to free (#11993).
+- CLI and accounts: a v0.14 CLI can start a session with --model again (#12152), /v1/me lists a person's accounts in one fixed order (#12143), members pick their own provider keys again (#12133), and whoami --json bounds the accounts list by serialized bytes (#12197).
+- Agents and sessions: My Kortix tool steps stay in the chat and never show the agent's instructions (#12113), a colleague runs as its parent instead of a guessed agent (#12059), a subagent may read its spawner's session log through the sandbox proxy (#12002), and a subagent call that combines subagent_type with an inline agent spec is refused (#12046). Colleague access asks move with a transferred project (#12173).
+- Connectors: a revoke with no revokedAt stays revoked (#11970), Composio 400 and INVALID_INPUT rejections classify as caller errors (#12067), and an HTML block page from Composio's edge names its title (#12089).
+- Sandboxes: the SDK retries a sandbox_not_ready upload 503 across the wake (#12024), a dead Platinum daemon relaunches on the first edge 502 for :8000 (#12025), a thrown recovery probe no longer condemns a runtime as lost (#12129, #12139), the turn relay stops retrying a refused credential (#12050), a reserved host that never resolves is not retried for 8 s (#12180), and GET /config's box-health probe is bounded at 3 s so a hung box stops holding pollers (#12048).
+- The project mirror's transient retry out-waits GitHub's fresh-repo visibility window (#12157).
+- The gateway_logs backfill reads each page once, so the prod migrate job finishes (#12131).
+- A racing change-request open retries instead of paging a 500 (#12042).
+- Web: the hero walkthrough survives a throwing step timeline (#12093), marketing dither fields degrade on a truthy non-WebGL context stub (#12103), Drive conflicts open in a bottom-right popover without the grow animation (#12112, #11042), a drive file that is gone stops invalidation refetches (#12123), a tool call clicked in the chat never opens an empty right panel (#12055), an agent row with a non-string slug renders a label instead of crashing the session page (#12088), an inline agent hand-off row reads "Inline" instead of "General" (#12127), the PostHog survey shows only after the first workspace (#12124), and the old /app path redirects to /download (#12045).
+- Voice: a no-source voice catalog is not kept — a source configured later is still fetched (#12080).
+- Workflows and sessions UI: workflow run rows own their text-xs scale (#12051), and a typed answer is captured for a docked question on an idle session (#12056).
+
+### Security
+- A public-share mode the path edge has not heard of is read-only (#11992), git-proxy GET routes authenticate before query validation (#11997), public OpenAPI operations are marked security: [] (#12009), and the gateway playground never echoes a database error's message (#11995).
+- Scoping: the Slack inbound-message claim is scoped to the receiving project (#12035), a project sandbox template image identity is scoped to the owning tenant (#12049), project-scoped rebuild of the shared platform default sandbox image is refused (#12047), selecting a session provider-secret pool requires project.secret.read (#12063), connector calls with an empty path argument are refused before the upstream call (#12105), and the public trigger webhook body is bounded before signature verification (#12062).
+- Unvalidated LLM-gateway credentials are charged to one shared bucket (#12101).
+- The Platinum sandbox webhook keys its replay guard on the delivery identity (#12084), and the edge contract serves Allow on 405 with HTTP→HTTPS 308 (#11707).
+- CLI logout revokes the login token (#12073).
+- Open repository advisories are closed (Bun Brotli, tunnel, Apps, Firecrawl, asks) (#12082), leaked credentials are revoked same day and CI never uses a Cloudflare Global API Key (#12083), the env separation gate judges every key by VALUE, not by its name (#11796), and the release tree's nine new CodeQL alerts are fixed in code (#12165).
+
+### Internal
+- Tests: one repo-root reader and flag parser (#11988), a service-account pin that GET /v1/accounts creates no workspace (#12017), session-tool and session-panel tests moved into @kortix/ui (#12097, #12106), Drive-conflicts popover coverage (#11042), token seeds lock the project first (#12145), fixture workspaces funded and on the OWNER's paid tier so the deployed smoke and sessions boot (#12150, #12166), the ke2e client honors the API's typed mirror-unavailable and pre-commit retryable 503s (#12158, #12159), a failed status assert keeps the origin classification and body (#12154), four bun stubs spread the real module so re-linked exports resolve (#12186), the audit-webhook SSRF fixture carries workspaceId and delivery is pinned to the SSRF guards (#12179, #11998), MCP-6 whoami runs as a one-workspace user (#12189), the machines hosting stub removes a runtime the way production does and extends AppHostingProvider (#12196, #12202), the scale test settles its background reconcile before the cleanup cascade (#12198), WS-ROUTE-3 compares the identity instead of OWNER's growing workspace list (#12207), git-token and create-repo flow bodies dedupe (#12142), the preview reaper splits its IO from the deploy module (#11987), and the nightly Tests lanes pass on dev (#12133, #12141).
+- API refactors, one owner per repeated mechanic: session reads (#12019), session-route gates and model-writer guards (#12027), api-git data access (#12044), an errorMessage helper (#12038), the BYO import cycle (#12026), one metadata patch and platinum status parser (#12052), session create finalization (#12061), the preview proxy split (#12064), connector policy row projection (#12108), IAM read models (#12191), one token wire and typed accounts handlers (#12185), billing god functions split (#12125), the Telegram adapter split (#12126), one scheduler for every scheduled job (#12070), five Slack channel paths on one helper each (#12118).
+- SDK refactors: the goals client moves onto @kortix/sdk (#12015), the wire-values mirror is single-sourced (#12075), one backend base and query serializer (#12087), one sandbox request core for the daemon clients (#12091), the SSE connection policy and LSP plumbing split out of the React hooks (#12094), one per-session mark record (#12102), App mutation shells deduped (#12098), the turns unit's untrusted-JSON guards (#12086), and every project's flag map resolves from one cached row (#12121).
+- Web, UI and mobile refactors: one useNow clock and deadline module (#12078), one shared white-label workbench kit (#12029), and file-local mobile exports cleaned up (#12066).
+- Infra and CI: colocated tests stay out of image builds so the API image builds again (#12014), the CI signing, comment and secret-sync ceremonies dedupe (#11996), the Trivy install probes github.com releases first (#12081), the supabase CLI images pull from ghcr.io (#12192), the git-core PPA add retries through Launchpad's sporadic 500s (#12205), GitHub IP ranges refreshed (#12104), the retired KORTIX_YOLO_URL plumbing dropped (#12069), Vercel stops building the frontend on every push (#12058), pnpm dev decrypts through the Armor login again (#12037), dev VERSION bumped to 0.15.3 (569ce4b), and a dry-run probe (a63e7cc).
+- Log noise: the title fallback stops warn-paging expected states (#12079), a refused runtime-floor is named once per box and window (#12039), the upstream-failure warn is rate-limited per call path (#12041), the per-prompt secret-grant refusal warn aggregates to one line per minute (#12040), the invalid-or-expired-token 401 warn is rate-limited per route and window (#12032), the throttled refusal line's severity follows its volume (#12054), the manifest tripwire logs at warn instead of error (#12211), and the googletag noise guard is bounded to the throw-site frame (#12148).
+- Docs and analytics: the learnings ledger carries a prod-error fix to staging in the same session (#12140) and keeps every key a released client sends in a strict request schema (#12160); the activation funnel splits invited from self-serve and counts every first prompt (#12034).

@@ -13,12 +13,13 @@ import type { MeResponse } from '../api/types.ts';
 const MCP_STDOUT_CAP = 45_000;
 
 const ACCOUNTS = 500;
+const account_id = (i: number) => `00000000-0000-4000-a000-${String(i).padStart(12, '0')}`;
 
 const me: MeResponse = {
   user_id: 'usr_test',
   email: 'owner@ke2e.kortix.test',
   accounts: Array.from({ length: ACCOUNTS }, (_, i) => ({
-    account_id: `00000000-0000-4000-a000-${String(i).padStart(12, '0')}`,
+    account_id: account_id(i),
     workspace_id: null,
     slug: `ws-${i}`,
     name: `Workspace ${i}`,
@@ -31,7 +32,7 @@ const auth = {
   token: 'kortix_pat_test',
   user_id: 'usr_test',
   user_email: 'owner@ke2e.kortix.test',
-  account_id: me.accounts[0]!.account_id,
+  account_id: account_id(0),
 };
 
 const realClient = await import('../api/client.ts');
@@ -79,7 +80,7 @@ describe('whoami --json', () => {
     // The whole-JSON contract: a pipe (and the MCP tool) parses it in one piece.
     const parsed = JSON.parse(stdout);
     expect(parsed.user_id).toBe('usr_test');
-    expect(parsed.account_id).toBe(me.accounts[0]!.account_id);
+    expect(parsed.account_id).toBe(account_id(0));
     // The list keeps its shape, capped, with the true total beside it.
     expect(Array.isArray(parsed.accounts)).toBe(true);
     expect(parsed.accounts.length).toBe(50);

@@ -54,6 +54,7 @@ import { accountMayUseManagedModels } from '../../billing/services/entitlements'
 import { DEFAULT_AGENT_SENTINEL } from '../agents';
 import { admitSessionSharingChange } from '../lib/session-model-keys';
 import { callerKortixSessionId } from '../../middleware/caller-session';
+import { loadLifecycleSession } from './lib/route-bindings';
 import { getImpersonationContext } from '../../shared/impersonation';
 import { peekSessionListPollEtag, storeSessionListPollEtag } from '../lib/session-list-poll-memo';
 import type { ProjectSessionListScope } from '../lib/session-inventory';
@@ -76,6 +77,7 @@ import { teamCreateMetadataError } from '../team-tasks/service';
 import { readSessionReplyCounts } from '../lib/session-reply-counts';
 import { readActiveChildAgents } from '../lib/session-active-child';
 import { turnPublishVerdict } from '../lib/http-session-access';
+import { workspaceIdParam } from '../../shared/route-params';
 
 const NO_USER_STATE = { pinnedAt: null, archivedAt: null };
 
@@ -195,12 +197,12 @@ export function registerProjectSessionsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'post',
-      path: '/{projectId}/sessions',
+      path: '/{workspaceId}/sessions',
       tags: ['sessions'],
       summary: 'Create a session (start an agent task)',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string() }),
+          params: z.object({ workspaceId: z.string() }),
           body: { content: { 'application/json': { schema: SessionCreateInputSchema } } },
         },
       responses: {
@@ -210,7 +212,7 @@ export function registerProjectSessionsRoutes(): void {
       },
     }),
     async (c) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const body = await readJsonObject(c);
     const serverManagedMetadataKey = serverManagedSessionMetadataKey(body.metadata);
     if (serverManagedMetadataKey) {
@@ -458,12 +460,12 @@ export function registerProjectSessionsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'get',
-      path: '/{projectId}/sessions',
+      path: '/{workspaceId}/sessions',
       tags: ['sessions'],
       summary: 'List sessions of a project',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string() }),
+          params: z.object({ workspaceId: z.string() }),
           query: z.object({
             scope: z.enum(['visible', 'project']).optional(),
             // The list is a keyset PAGE, not the whole inventory. See
@@ -515,7 +517,7 @@ export function registerProjectSessionsRoutes(): void {
       },
     }),
     async (c) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const query = c.req.valid('query');
     const scope = (query.scope ?? 'visible') as ProjectSessionListScope;
 
@@ -707,12 +709,12 @@ export function registerProjectSessionsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'get',
-      path: '/{projectId}/sessions/{sessionId}',
+      path: '/{workspaceId}/sessions/{sessionId}',
       tags: ['sessions'],
       summary: 'Get a session',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string(), sessionId: z.string() }),
+          params: z.object({ workspaceId: z.string(), sessionId: z.string() }),
         },
       responses: {
           200: json(SessionSchema, 'The session'),
@@ -722,19 +724,19 @@ export function registerProjectSessionsRoutes(): void {
     async (c) => {
     const sessionId = c.req.param('sessionId');
     if (!isUuid(sessionId)) return c.json({ error: 'Invalid session id' }, 400);
-    return sessionReadResponse(c, c.req.param('projectId'), sessionId);
+    return sessionReadResponse(c, workspaceIdParam(c), sessionId);
   },
   );
 
   projectsApp.openapi(
     createRoute({
       method: 'put',
-      path: '/{projectId}/sessions/{sessionId}/sharing',
+      path: '/{workspaceId}/sessions/{sessionId}/sharing',
       tags: ['sessions'],
       summary: 'Set who can see a session',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string(), sessionId: z.string() }),
+          params: z.object({ workspaceId: z.string(), sessionId: z.string() }),
           body: { content: { 'application/json': { schema: lenientBody({
               mode: z.enum(['project', 'private', 'members']).openapi({ description: 'project: everyone in the project. private: owner only. members: the listed members and groups.' }),
               ownerId: z.string().optional().openapi({ description: 'For mode private: the owner user id. Defaults to the caller.' }),
@@ -748,7 +750,7 @@ export function registerProjectSessionsRoutes(): void {
       },
     }),
     async (c) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const sessionId = c.req.param('sessionId');
     if (!isUuid(sessionId)) return c.json({ error: 'Invalid session id' }, 400);
 
@@ -916,12 +918,12 @@ export function registerProjectSessionsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'patch',
-      path: '/{projectId}/sessions/{sessionId}',
+      path: '/{workspaceId}/sessions/{sessionId}',
       tags: ['sessions'],
       summary: 'Rename a session or merge metadata into it',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string(), sessionId: z.string() }),
+          params: z.object({ workspaceId: z.string(), sessionId: z.string() }),
           body: { content: { 'application/json': { schema: lenientBody({
               name: z.string().optional().openapi({ description: 'New display name. Empty string or null clears the rename.' }),
               labels: z.array(z.string()).optional().openapi({ description: 'Replaces the session labels. Each is trimmed, 1..64 characters; at most 20; duplicates drop. [] clears them.' }),
@@ -934,7 +936,7 @@ export function registerProjectSessionsRoutes(): void {
       },
     }),
     async (c) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const sessionId = c.req.param('sessionId');
     if (!isUuid(sessionId)) return c.json({ error: 'Invalid session id' }, 400);
 
@@ -1065,12 +1067,12 @@ export function registerProjectSessionsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'delete',
-      path: '/{projectId}/sessions/{sessionId}',
+      path: '/{workspaceId}/sessions/{sessionId}',
       tags: ['sessions'],
       summary: 'Delete a session (restorable until restore_until; then its content and branch are deleted)',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string(), sessionId: z.string() }),
+          params: z.object({ workspaceId: z.string(), sessionId: z.string() }),
         },
       responses: {
           200: json(SessionDeleteResultSchema, 'Session deleted; restorable until restore_until'),
@@ -1078,7 +1080,7 @@ export function registerProjectSessionsRoutes(): void {
       },
     }),
     async (c) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const sessionId = c.req.param('sessionId');
     if (!isUuid(sessionId)) return c.json({ error: 'Invalid session id' }, 400);
 
@@ -1089,14 +1091,15 @@ export function registerProjectSessionsRoutes(): void {
     assertAgentScope(c, PROJECT_ACTIONS.PROJECT_SESSION_STOP);
 
     // Stopping a session is reserved for its owner or a project manager.
-    const visible = await loadVisibleSession(loaded, sessionId, c.get('sessionId') ?? null, callerKortixSessionId(c));
-    if (!visible) return c.json({ error: 'Not found' }, 404);
-    if (!visible.canManageLifecycle) {
-        return c.json(
-          { error: 'Only the session owner or a project manager can stop this session' },
-          403,
-        );
-    }
+    const gate = await loadLifecycleSession(
+      c,
+      loaded,
+      sessionId,
+      'Only the session owner or a workspace manager can stop this session',
+      { rejectTombstoned: false },
+    );
+    if (gate.kind === 'error') return gate.response;
+    const { visible } = gate;
     // A repeated delete (the SDK retries one whose response was lost) answers
     // with the first stamp: the restore window never moves.
     const restoreUntil = sessionIsTombstoned(visible.row) ? sessionRestoreUntil(visible.row.metadata?.deletedAt) : null;
@@ -1122,12 +1125,12 @@ export function registerProjectSessionsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'post',
-      path: '/{projectId}/sessions/{sessionId}/restore',
+      path: '/{workspaceId}/sessions/{sessionId}/restore',
       tags: ['sessions'],
       summary: 'Restore a deleted session before its restore_until',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string(), sessionId: z.string() }),
+          params: z.object({ workspaceId: z.string(), sessionId: z.string() }),
         },
       responses: {
           200: json(OkSchema, 'Session restored; its next start boots a fresh sandbox from its branch'),
@@ -1135,7 +1138,7 @@ export function registerProjectSessionsRoutes(): void {
       },
     }),
     async (c) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const sessionId = c.req.param('sessionId');
     if (!isUuid(sessionId)) return c.json({ error: 'Invalid session id' }, 400);
 
@@ -1143,14 +1146,14 @@ export function registerProjectSessionsRoutes(): void {
     if (!loaded) return c.json({ error: 'Not found' }, 404);
     assertAgentScope(c, PROJECT_ACTIONS.PROJECT_SESSION_STOP);
 
-    const visible = await loadVisibleSession(loaded, sessionId, c.get('sessionId') ?? null, callerKortixSessionId(c));
-    if (!visible) return c.json({ error: 'Not found' }, 404);
-    if (!visible.canManageLifecycle) {
-        return c.json(
-          { error: 'Only the session owner or a project manager can restore this session' },
-          403,
-        );
-    }
+    const gate = await loadLifecycleSession(
+      c,
+      loaded,
+      sessionId,
+      'Only the session owner or a workspace manager can restore this session',
+      { rejectTombstoned: false },
+    );
+    if (gate.kind === 'error') return gate.response;
 
     const result = await restoreSession({ projectId, sessionId, accountId: loaded.row.accountId });
     if ('error' in result) return c.json({ error: result.error, code: result.code }, result.status);

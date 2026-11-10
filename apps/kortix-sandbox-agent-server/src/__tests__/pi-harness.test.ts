@@ -2189,12 +2189,12 @@ describe('pi subagents extension', () => {
       port: 0,
       fetch: async (req) => {
         const path = new URL(req.url).pathname
-        if (req.method === 'POST' && path === '/v1/projects/proj-pi-test/sessions') {
+        if (req.method === 'POST' && path === '/v1/workspaces/proj-pi-test/sessions') {
           creates.push((await req.json()) as Record<string, any>)
           return Response.json({ session_id: `cloud-child-${creates.length}` }, { status: 201 })
         }
         if (path.endsWith('/transcript')) return Response.json({ messages: [{ role: 'user', text: 'go' }, { role: 'assistant', text: 'cloud report' }] })
-        if (req.method === 'GET' && path.startsWith('/v1/projects/proj-pi-test/sessions/cloud-child-')) {
+        if (req.method === 'GET' && path.startsWith('/v1/workspaces/proj-pi-test/sessions/cloud-child-')) {
           return Response.json({ status: 'running', working: { state: 'idle', since: '2026-10-24T10:00:00.000Z', pending_delivery: false } })
         }
         return new Response('not found', { status: 404 })
@@ -2235,6 +2235,133 @@ describe('pi subagents extension', () => {
     }
   })
 
+  test('My Kortix (KORTIX_META_AGENT=1): an inline agent and a built-in run as My Kortix with their own prompts; a named agent runs as itself', async () => {
+    const creates: Array<Record<string, any>> = []
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        const path = new URL(req.url).pathname
+        if (req.method === 'POST' && path === '/v1/workspaces/proj-pi-test/sessions') {
+          creates.push((await req.json()) as Record<string, any>)
+          return Response.json({ session_id: `cloud-child-${creates.length}` }, { status: 201 })
+        }
+        if (path.endsWith('/transcript')) return Response.json({ messages: [{ role: 'user', text: 'go' }, { role: 'assistant', text: 'cloud report' }] })
+        if (req.method === 'GET' && path.startsWith('/v1/workspaces/proj-pi-test/sessions/cloud-child-')) {
+          return Response.json({ status: 'running', working: { state: 'idle', since: '2026-10-24T10:00:00.000Z', pending_delivery: false } })
+        }
+        return new Response('not found', { status: 404 })
+      },
+    })
+    try {
+      const r = await boot({
+        script: [
+          TASK({ subagent_type: undefined, agent: { instructions: 'You are a product designer and prototyper.' }, run_in_background: false }),
+          TASK({ subagent_type: 'general', run_in_background: false }),
+          TASK({ subagent_type: 'engineering', run_in_background: false }),
+          { text: 'parent done' },
+        ],
+        env: {
+          // The compiled config of My Kortix (my-kortix-agent.ts `buildMyKortixConfig`): one agent, no schema.
+          KORTIX_COMPILED_AGENT_CONFIG: JSON.stringify({ agent: { mykortix: { mode: 'primary', prompt: 'You are My Kortix.' } } }),
+          KORTIX_API_URL: `http://127.0.0.1:${server.port}/v1`,
+          KORTIX_AGENT_NAME: 'mykortix',
+          KORTIX_META_AGENT: '1',
+        },
+      })
+      await promptAndSettle(r, 'hand three things off')
+      expect(creates.map((c) => c.agent_name)).toEqual(['mykortix', 'mykortix', 'engineering'])
+      expect(creates[0]!.runtime_context['kortix.agent.instructions']).toBe('You are a product designer and prototyper.')
+      expect(String(creates[1]!.runtime_context['kortix.agent.instructions'])).toStartWith('You are a subagent')
+      expect(creates[2]!.runtime_context).not.toHaveProperty('kortix.agent.instructions')
+      // The coordinator's own prompt never reaches a child, as a note or otherwise.
+      expect(creates.some((c) => JSON.stringify(c).includes('You are My Kortix.'))).toBe(false)
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test('My Kortix: a colleague with connectors and secrets waits for the person, then starts on the same call; same-session and a non-coordinator are refused', async () => {
+    const creates: Array<Record<string, any>> = []
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        const path = new URL(req.url).pathname
+        if (req.method === 'POST' && path === '/v1/workspaces/proj-pi-test/sessions') {
+          creates.push((await req.json()) as Record<string, any>)
+          // The first start waits for the person; the person allows; the second start runs.
+          if (creates.length === 1) {
+            return Response.json({ error: 'The person must allow this colleague access first (connector gmail and secret STRIPE_KEY).', code: 'COLLEAGUE_ACCESS_APPROVAL_REQUIRED', ask_id: 'access:a1' }, { status: 409 })
+          }
+          return Response.json({ session_id: 'colleague-1' }, { status: 201 })
+        }
+        if (req.method === 'GET' && path.startsWith('/v1/workspaces/proj-pi-test/sessions')) return Response.json([])
+        return new Response('not found', { status: 404 })
+      },
+    })
+    const colleague = { instructions: 'You check invoices.', connectors: ['gmail'], secrets: ['STRIPE_KEY'] }
+    try {
+      const r = await boot({
+        script: [
+          TASK({ description: 'Check invoices', subagent_type: undefined, agent: colleague }),
+          TASK({ description: 'Check invoices', subagent_type: undefined, agent: colleague }),
+          TASK({ description: 'Check invoices here', subagent_type: undefined, agent: colleague, session: 'same' }),
+          { text: 'parent done' },
+        ],
+        env: {
+          KORTIX_COMPILED_AGENT_CONFIG: JSON.stringify({ agent: { mykortix: { mode: 'primary', prompt: 'You are My Kortix.' } } }),
+          KORTIX_API_URL: `http://127.0.0.1:${server.port}/v1`,
+          KORTIX_AGENT_NAME: 'mykortix',
+          KORTIX_META_AGENT: '1',
+        },
+      })
+      await promptAndSettle(r, 'start a colleague with gmail')
+      expect(creates.map((c) => c.colleague_access)).toEqual([
+        { connectors: ['gmail'], secrets: ['STRIPE_KEY'] },
+        { connectors: ['gmail'], secrets: ['STRIPE_KEY'] },
+      ])
+      const page = (await r.bearer(`/kortix/runtime/messages/${r.service.runtime()!.rootId}`).then((res) => res.json())) as WirePage
+      const parts = toolParts(page, 'task')
+      expect(parts).toHaveLength(3)
+      // Waiting for the person is a result, not a failure, and it carries no task id.
+      expect(parts[0]!.state.status).toBe('completed')
+      expect(parts[0]!.state.output).toContain('<task_awaiting_approval>')
+      expect(parts[0]!.state.output).not.toContain('task_id:')
+      expect(parts[0]!.state.metadata).toMatchObject({ awaitingApproval: true, askId: 'access:a1' })
+      expect(parts[1]!.state.output).toContain('task_id: colleague-1')
+      expect(parts[2]!.state.status).toBe('error')
+      expect(parts[2]!.state.error).toContain('runs in its own session')
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test('only the coordinator hands an inline agent connectors or secrets', async () => {
+    const creates: Array<Record<string, any>> = []
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        if (req.method === 'POST' && new URL(req.url).pathname === '/v1/workspaces/proj-pi-test/sessions') {
+          creates.push((await req.json()) as Record<string, any>)
+        }
+        return Response.json([])
+      },
+    })
+    try {
+      const r = await boot({
+        script: [TASK({ description: 'Mail it', subagent_type: undefined, agent: { instructions: 'You send mail.', connectors: ['gmail'] } }), { text: 'parent done' }],
+        env: { KORTIX_API_URL: `http://127.0.0.1:${server.port}/v1` },
+      })
+      await promptAndSettle(r, 'hand out gmail')
+      expect(creates).toEqual([])
+      const page = (await r.bearer(`/kortix/runtime/messages/${r.service.runtime()!.rootId}`).then((res) => res.json())) as WirePage
+      const [part] = toolParts(page, 'task')
+      expect(part!.state.status).toBe('error')
+      expect(part!.state.error).toContain('Only My Kortix hands an inline agent connectors or secrets')
+    } finally {
+      server.stop(true)
+    }
+  })
+
   test('run_in_background: the call returns the child task_id at once, asks the API to notify this session, and the turn goes on', async () => {
     const creates: Array<Record<string, any>> = []
     const reads: string[] = []
@@ -2242,11 +2369,11 @@ describe('pi subagents extension', () => {
       port: 0,
       fetch: async (req) => {
         const url = new URL(req.url)
-        if (req.method === 'POST' && url.pathname === '/v1/projects/proj-pi-test/sessions') {
+        if (req.method === 'POST' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') {
           creates.push((await req.json()) as Record<string, any>)
           return Response.json({ session_id: 'bg-child-1' }, { status: 201 })
         }
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/sessions') {
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') {
           reads.push(`list ${url.searchParams.get('parent')}`)
           return Response.json([])
         }
@@ -2281,6 +2408,54 @@ describe('pi subagents extension', () => {
     }
   })
 
+  test('subagent_type and an inline agent spec are mutually exclusive: the call is refused before any child, and the corrected call spawns the child', async () => {
+    // The empty inline spec is the exact shape a router over the wire sent beside its subagent_type:
+    // the inline spec silently displaced the named agent and the child ran as an unnamed inline agent.
+    const creates: Array<Record<string, unknown>> = []
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        const path = new URL(req.url).pathname
+        if (req.method === 'POST' && path === '/v1/workspaces/proj-pi-test/sessions') {
+          creates.push((await req.json()) as Record<string, unknown>)
+          return Response.json({ session_id: 'refusal-child' }, { status: 201 })
+        }
+        if (req.method === 'GET' && path.startsWith('/v1/workspaces/proj-pi-test/sessions')) return Response.json([])
+        return new Response('not found', { status: 404 })
+      },
+    })
+    try {
+      const r = await boot({
+        script: [
+          TASK({ description: 'Ship it', subagent_type: 'general', agent: { instructions: '', tools: [], model: '', description: '' } }),
+          TASK({ description: 'Ship it too', subagent_type: 'general', agent: { instructions: 'You do extra work.' } }),
+          // The corrected hand-off, without the inline spec: the child starts (the loop cannot repeat the same failure).
+          TASK({ description: 'Ship it right', subagent_type: 'general' }),
+          { text: 'parent done' },
+        ],
+        env: { KORTIX_API_URL: `http://127.0.0.1:${server.port}/v1` },
+      })
+      await promptAndSettle(r, 'delegate with a named type, then the corrected call')
+      expect(creates).toHaveLength(1)
+      // A built-in `general` maps to no project agent (cloud-subagent.ts), so the create
+      // carries no `agent_name`; the named project-agent path is asserted by the
+      // 'separate sessions (the default, no `session` arg)' test above (agent_name reviewer/build).
+      expect('agent_name' in creates[0]!).toBe(false)
+      const page = (await r.bearer(`/kortix/runtime/messages/${r.service.runtime()!.rootId}`).then((res) => res.json())) as WirePage
+      const parts = toolParts(page, 'task')
+      expect(parts).toHaveLength(3)
+      for (const part of parts.slice(0, 2)) {
+        expect(part.state.status, 'a refused call carries its error').toBe('error')
+        expect(part.state.error).toContain('cannot combine')
+        expect(part.state.error).toContain('"general"')
+      }
+      expect(parts[2]!.state.status).toBe('completed')
+      expect(parts[2]!.state.output).toContain('<task_started>')
+    } finally {
+      server.stop(true)
+    }
+  })
+
   test('a router (kortix.front) has only agent, send_message and task_stop; it routes each task to a roster agent or My Kortix, as a named background worker, not narrowed', async () => {
     const creates: Array<Record<string, any>> = []
     let detailReads = 0
@@ -2288,12 +2463,12 @@ describe('pi subagents extension', () => {
       port: 0,
       fetch: async (req) => {
         const url = new URL(req.url)
-        if (req.method === 'POST' && url.pathname === '/v1/projects/proj-pi-test/sessions') {
+        if (req.method === 'POST' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') {
           creates.push((await req.json()) as Record<string, any>)
           return Response.json({ session_id: `front-worker-${creates.length}` }, { status: 201 })
         }
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/sessions') return Response.json([])
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/detail') {
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') return Response.json([])
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/detail') {
           detailReads++
           return Response.json({
             config: {
@@ -2377,18 +2552,35 @@ describe('pi subagents extension', () => {
     expect(systems.every((system) => system.startsWith("You are Kortix, the watcher of one space"))).toBe(true)
   })
 
+  test('an inline agent (kortix.agent.instructions) runs on its instructions, never on its agent\'s own prompt', async () => {
+    const r = await boot({
+      script: [{ text: 'ok' }],
+      env: {
+        KORTIX_AGENT_NAME: 'coder',
+        KORTIX_COMPILED_AGENT_CONFIG: JSON.stringify({ agent: { coder: { prompt: 'You code.', description: 'Writes code' } } }),
+        KORTIX_SESSION_CONTEXT: JSON.stringify({ 'kortix.subagent.depth': 1, 'kortix.agent.instructions': 'You are a product designer and prototyper.' }),
+      },
+    })
+    const sentBefore = gateway.sent.length
+    await promptAndSettle(r, 'Build the three prototypes.')
+    const systems = gateway.sent.slice(sentBefore).map(systemSent)
+    expect(systems.length).toBeGreaterThan(0)
+    expect(systems.every((system) => system.startsWith('You are a product designer and prototyper.'))).toBe(true)
+    expect(systems.some((system) => system.includes('You code.'))).toBe(false)
+  })
+
   test("a router's prompt body thread_files end every worker prompt with the Context files block, a notice turn's too", async () => {
     const creates: Array<Record<string, any>> = []
     const server = Bun.serve({
       port: 0,
       fetch: async (req) => {
         const url = new URL(req.url)
-        if (req.method === 'POST' && url.pathname === '/v1/projects/proj-pi-test/sessions') {
+        if (req.method === 'POST' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') {
           creates.push((await req.json()) as Record<string, any>)
           return Response.json({ session_id: `files-worker-${creates.length}` }, { status: 201 })
         }
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/sessions') return Response.json([])
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/detail') return Response.json({ config: { agents: [] } })
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') return Response.json([])
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/detail') return Response.json({ config: { agents: [] } })
         return new Response('not found', { status: 404 })
       },
     })
@@ -2436,11 +2628,11 @@ describe('pi subagents extension', () => {
       port: 0,
       fetch: async (req) => {
         const url = new URL(req.url)
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/sessions') return Response.json([])
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/sessions/bg-child-7') {
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') return Response.json([])
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/sessions/bg-child-7') {
           return Response.json({ session_id: 'bg-child-7', parent_session_id: 'sess-pi-test', status: 'stopped', metadata: { notify_parent: true }, working: { state: 'idle' } })
         }
-        if (req.method === 'POST' && url.pathname === '/v1/projects/proj-pi-test/sessions/bg-child-7/prompts') {
+        if (req.method === 'POST' && url.pathname === '/v1/workspaces/proj-pi-test/sessions/bg-child-7/prompts') {
           prompts.push((await req.json()) as Record<string, any>)
           return Response.json({ prompt_id: 'p1', state: 'queued' }, { status: 202 })
         }
@@ -2473,13 +2665,13 @@ describe('pi subagents extension', () => {
       port: 0,
       fetch: async (req) => {
         const url = new URL(req.url)
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/sessions') return Response.json([finished])
-        if (req.method === 'POST' && url.pathname === '/v1/projects/proj-pi-test/sessions') {
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') return Response.json([finished])
+        if (req.method === 'POST' && url.pathname === '/v1/workspaces/proj-pi-test/sessions') {
           creates.push(await req.json())
           return Response.json({ session_id: 'bg-child-10' }, { status: 201 })
         }
-        if (req.method === 'GET' && url.pathname === '/v1/projects/proj-pi-test/sessions/bg-child-9') return Response.json(finished)
-        if (req.method === 'POST' && url.pathname === '/v1/projects/proj-pi-test/sessions/bg-child-9/prompts') {
+        if (req.method === 'GET' && url.pathname === '/v1/workspaces/proj-pi-test/sessions/bg-child-9') return Response.json(finished)
+        if (req.method === 'POST' && url.pathname === '/v1/workspaces/proj-pi-test/sessions/bg-child-9/prompts') {
           prompts.push((await req.json()) as Record<string, any>)
           return Response.json({ prompt_id: 'p1', state: 'queued' }, { status: 202 })
         }
@@ -2509,7 +2701,7 @@ describe('pi subagents extension', () => {
     const server = Bun.serve({
       port: 0,
       fetch: (req) => {
-        if (req.method === 'POST' && new URL(req.url).pathname === '/v1/projects/proj-pi-test/sessions') creates += 1
+        if (req.method === 'POST' && new URL(req.url).pathname === '/v1/workspaces/proj-pi-test/sessions') creates += 1
         return new Response('not found', { status: 404 })
       },
     })

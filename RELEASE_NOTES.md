@@ -1,35 +1,27 @@
-Notifications with an Inbox, flag-free Artifacts, and sturdier APIs
+Workspaces, one settings panel, and API keys that act as an agent or a bot
 
 ### New
 
-- Notifications are on for every project, and a new Inbox page in the sidebar replaces the bell. (#11959)
-- Artifacts no longer need a feature flag. Artifact comments have been removed. (#11963)
+- **Workspaces.** One workspace is one company: its people, agents, sessions, connectors, files and billing. It replaces "project" and "account" in the web app, the desktop app, mobile, the CLI, the TUI and the docs, in 9 languages. Sign-up lands on "Create a workspace" or an invite, and the switcher lists workspaces. Old routes, SDK names, `kortix projects`, `--project` and existing URLs keep working.
+- **One settings panel.** Workspace settings holds everything an admin changes: the workspace, Library (models, connectors, secrets, skills, drives, triggers, sandbox, Git, repository), People, Billing and Advanced, with deep search. Customize now opens Workspace settings.
+- **API keys act as you, an agent or a bot.** One API keys list replaces API keys and service account tokens. A key has read, full or custom access, expires after 90 days by default, and stops working when its creator leaves (a key for an agent or a bot keeps working). The CLI has `kortix keys`.
+- **Review moves into the Inbox** as its own tab.
+- **One model picker** with favorites, provider tabs and thinking levels. Connect ChatGPT and Connect Claude sit on the workspace home.
+- **Getting started:** a workspace with no runnable agent shows a one-click setup prompt instead of an empty chat.
 
 ### Improved
 
-- The Inbox moves out of the sidebar into the workspace menu. (#11986)
-- Trigger rows truncate long names and count down to the next run. (#11972)
+- The upgrade dialog shows the same plans as the pricing page, and no longer scrolls sideways at high credit tiers.
+- Drive conflicts open in a small popover.
+- Session logs and Models › Logs load faster on large workspaces.
+- `kortix logout` revokes the login token.
+- Kortix Cloud no longer offers account branding. Self-hosted installs keep it.
 
 ### Fixed
 
-- Opening a session no longer crashes when its agent handed work to an inline agent. That row now reads "Inline". (#12088, #12127)
-- A chat link to a drive file opens the file preview instead of a 404. (#11954)
-- A down user-app port no longer logs a warning on every proxy retry. (#11948)
-- The needs-input badge poll no longer surfaces as an error toast or a Sentry event. (#11952)
-- The connector catalogue restarts at page 1 when its cursor can't be decoded. (#11960)
-- Session costs answer 400, not 500, for a malformed owner id. (#11962)
-- Per-member IAM routes answer 400 for a non-UUID member id. (#11961)
-- A missing project now shows the same 404 as the rest of the app. (#11965)
-- security.txt is served through the test-environment gate. (#11967)
-- The /a1o canvas is skipped on browsers without WebGL2 instead of failing. (#11977)
-- A blocked gapi script load no longer makes a page retry forever. (#11985)
-- A run that compacts its context still stops at its agent's step cap. (#11725)
-
-### Internal
-
-- Test isolation across @kortix/db and @kortix/voice, with shared stubs exporting withDbTransaction and resolvePrincipal and the runner contract recording them isolated. (#11968, #11974, #11976, #11978, #11982)
-- Flow test scaffolding deduped into shared fixtures. (#11984)
-- Web cleanup: dead palette rows, the settings kind and sitemap duplicates removed; docs generators, Sentry init and entrypoint rules unified. (#11955, #11966)
-- The document-review state CLI is smaller. (#11973)
-- The self-host migrate image ships ledger-repair, and the v0.15.1 release suite is green. (#11956)
-- The big-store recovery pass runs with 2 vCPU and 16 GB. (#11950)
+- A tool call clicked in the chat no longer opens an empty side panel.
+- A subagent runs as its parent agent, never as a guessed one.
+- A failed Stripe check no longer moves a paid workspace to the free plan.
+- A Platinum box whose daemon stops is restarted on the next request.
+- Connector calls, webhooks, Slack messages, sandbox templates and public shares refuse more malformed or out-of-scope requests.
+- Many quieter error reports, and fewer false alerts.

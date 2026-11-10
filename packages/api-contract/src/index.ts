@@ -164,6 +164,8 @@ export type SharingIntent = z.infer<typeof SharingIntentSchema>;
 /** A project as serialized by `serializeProject`. */
 export const ProjectSchema = z.object({
   project_id: z.string(),
+  /** The workspace id. Equal to `project_id` (a workspace is its project); sent since 2026-11-05. */
+  workspace_id: z.string().optional(),
   account_id: z.string(),
   name: z.string(),
   repo_url: z.string(),
@@ -1035,10 +1037,11 @@ export const SessionCreateInputSchema = z
     sandbox_slug: z.string().min(1).optional(),
     initial_prompt: z.string().optional(),
     /**
-     * Harness context that rides beside `initial_prompt` and is delivered to
-     * the model as a synthetic (model-only) message part — e.g. the CLI's
-     * worker contract. The transcript keeps showing the caller's own words:
-     * every renderer already hides synthetic text parts.
+     * Harness context that rides beside `initial_prompt` — e.g. the CLI's
+     * worker contract. pi appends it to the first user message
+     * (kortixd `harness/pi/boot.ts`), so the transcript shows it after the
+     * caller's words. It is never a system prompt: an inline agent's
+     * instructions ride in `runtime_context` `kortix.agent.instructions`.
      */
     initial_context: z.string().min(1).max(SESSION_INITIAL_CONTEXT_MAX_CHARS).optional(),
     pending_prompt: PendingSessionPromptSchema.optional(),
@@ -1099,6 +1102,28 @@ export const SessionCreateInputSchema = z
     // means inject zero project secrets. Backend origin required — a non-backend
     // caller supplying it is rejected 403 (canOverride 'secrets').
     secrets: SessionSecretsAllowlistSchema.optional(),
+    /**
+     * Connectors (slugs) and project secrets (identifiers) My Kortix hands one
+     * colleague: an inline child that runs as My Kortix. Only a My Kortix
+     * session starting a colleague sends it. A person allows the exact list
+     * first; until then the create answers 409
+     * `COLLEAGUE_ACCESS_APPROVAL_REQUIRED` with the ask id, and no session exists.
+     */
+    colleague_access: z
+      .object({
+        connectors: z.array(z.string().min(1).max(128)).max(20).optional(),
+        secrets: z.array(z.string().min(1).max(128)).max(20).optional(),
+      })
+      .strict()
+      .optional(),
+    /**
+     * @deprecated The pre-W5 name of `model`. `kortix sessions new --model` in
+     * CLI v0.13.0–v0.14.19 sends `model` and `opencode_model` with the same
+     * value. This object is `.strict()`, so dropping the key (#11848) turned
+     * every such create into a 400. `model` wins; this is read only when
+     * `model` is absent.
+     */
+    opencode_model: z.string().min(1).optional(),
     // Deprecated camelCase compatibility accepted by the pre-contract route.
     // New SDK/API consumers use the snake_case fields above.
     baseRef: z.string().min(1).optional(),
@@ -1163,6 +1188,8 @@ export const SessionWorkingSchema = z.object({
 export type SessionWorking = z.infer<typeof SessionWorkingSchema>;
 
 export const ProjectSessionSchema = z.object({
+  /** The workspace id: the same value as `project_id`. Optional: older servers omit it. */
+  workspace_id: z.string().optional(),
   /** Durable conversation selection, falling back to the creation pin before a log exists. */
   model: z.string().nullable().optional(),
   /** Work activity, independent of the computer lifecycle status. Older servers may omit it. */
@@ -2606,6 +2633,9 @@ export type AccountBranding = z.infer<typeof AccountBrandingSchema>;
  *  plan no longer allows it; create and rename omit it. */
 export const AccountSummarySchema = z.object({
   account_id: z.string(),
+  /** The workspace this account key belongs to: its one active project. Null for an
+   *  account with no project, or a legacy account with several (not split yet). Sent since 2026-11-05. */
+  workspace_id: z.string().nullable().optional(),
   name: z.string(),
   slug: z.string(),
   created_at: z.string(),
@@ -2733,6 +2763,8 @@ export const SecretSchema = z.object({
   /** The env var KEY injected into the sandbox. Not unique. */
   name: z.string(),
   project_id: z.string(),
+  /** The workspace id: the same value as `project_id`. Optional: older servers omit it. */
+  workspace_id: z.string().optional(),
   secret_id: z.string().nullable(),
   created_by: z.string().nullable(),
   created_at: z.string().nullable(),

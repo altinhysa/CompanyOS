@@ -101,7 +101,7 @@ describe('cloudSpawnSession — create', () => {
     expect(result).toEqual({ sessionId: 'child-1', status: 'completed', text: 'Found 3 issues in the diff.', model: { providerID: 'kortix', modelID: 'default' } })
     expect(seen).toEqual([{ sessionId: 'child-1', model: { providerID: 'kortix', modelID: 'default' } }])
     const create = calls.find((c) => c.method === 'POST')!
-    expect(create.url).toBe('https://api.example.com/v1/projects/proj-1/sessions')
+    expect(create.url).toBe('https://api.example.com/v1/workspaces/proj-1/sessions')
     expect(create.headers.authorization).toBe('Bearer sess-token')
     expect(create.body).toEqual({
       initial_prompt: 'review the diff',
@@ -110,7 +110,7 @@ describe('cloudSpawnSession — create', () => {
       runtime_context: { 'kortix.subagent.depth': 1 },
     })
     const read = calls.find((c) => c.url.includes('/transcript'))!
-    expect(read.url).toBe('https://api.example.com/v1/projects/proj-1/sessions/child-1/transcript?limit=20&detail=full')
+    expect(read.url).toBe('https://api.example.com/v1/workspaces/proj-1/sessions/child-1/transcript?limit=20&detail=full')
     expect(read.headers.authorization).toBe('Bearer sess-token')
   })
 
@@ -120,29 +120,59 @@ describe('cloudSpawnSession — create', () => {
     expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ agent_name: 'builder', initial_context: 'You are a subagent.' })
   })
 
-  test('the platform coordinator sends no agent_name (the API picks the project default)', async () => {
-    // runtime.ts `cloudParent` leaves `parentAgent` out for the coordinator.
-    const coordinator = cloudSubagentApiFrom({ apiUrl: 'https://a/v1', projectId: 'p', sandboxToken: 't' })!
+  test('a parent with no resolved agent (a router) sends no agent_name, and the spec rides as a note', async () => {
+    const router = cloudSubagentApiFrom({ apiUrl: 'https://a/v1', projectId: 'p', sandboxToken: 't' })!
     const { impl, calls } = fakeApi({ rows: [IDLE], transcript: report('done') })
-    await cloudSpawnSession({ ...coordinator, fetchImpl: impl }, { title: 'x', agent: 'inline', systemPrompt: 'Be brief.', prompt: 'go' }, fast)
-    expect(calls.find((c) => c.method === 'POST')!.body).not.toHaveProperty('agent_name')
+    await cloudSpawnSession({ ...router, fetchImpl: impl }, { title: 'x', agent: 'general', systemPrompt: 'Be brief.', prompt: 'go' }, fast)
+    const body = calls.find((c) => c.method === 'POST')!.body
+    expect(body).not.toHaveProperty('agent_name')
+    expect(body.initial_context).toBe('Be brief.')
+  })
+
+  test('the platform coordinator: every child that names no agent runs as the coordinator, with the spec prompt as its own system prompt', async () => {
+    // My Kortix's own prompt never runs in a child: a built-in, a fork and an inline agent each bring theirs.
+    const coordinator = api(fakeApi({}).impl, { parentAgent: 'mykortix', coordinator: true })
+    for (const spec of [
+      { agent: 'general', systemPrompt: 'You are a subagent.' },
+      { agent: 'inline', systemPrompt: 'You are a product designer.', ownPrompt: true },
+      { agent: 'inline', systemPrompt: 'You are a fork.', fork: true },
+    ]) {
+      const { impl, calls } = fakeApi({ rows: [IDLE], transcript: report('done') })
+      await cloudSpawnSession({ ...coordinator, fetchImpl: impl }, { title: 'x', prompt: 'go', ...spec }, fast)
+      const body = calls.find((c) => c.method === 'POST')!.body
+      expect(body.agent_name).toBe('mykortix')
+      expect(body.runtime_context['kortix.agent.instructions']).toBe(spec.systemPrompt)
+      expect(body).not.toHaveProperty('initial_context')
+    }
+  })
+
+  test('the coordinator naming a workspace agent: that agent runs on its own prompt, with no instructions key', async () => {
+    const { impl, calls } = fakeApi({ rows: [IDLE], transcript: report('done') })
+    await cloudSpawnSession(api(impl, { parentAgent: 'mykortix', coordinator: true }), { title: 'x', agent: 'engineering', systemPrompt: 'unused', prompt: 'go' }, fast)
+    const body = calls.find((c) => c.method === 'POST')!.body
+    expect(body.agent_name).toBe('engineering')
+    expect(body.runtime_context).not.toHaveProperty('kortix.agent.instructions')
+    expect(body).not.toHaveProperty('initial_context')
   })
 
   test('an inline spec: instructions, model and its tools inside the parent narrowing', async () => {
     const { impl, calls } = fakeApi({ rows: [IDLE], transcript: report('done') })
     const result = await cloudSpawnSession(
       api(impl, { depth: 1, toolAllowlist: ['read', 'grep', 'bash'] }),
-      { title: 'x', agent: 'inline', systemPrompt: 'You audit logs.', model: 'kortix/fast', tools: ['read', 'write', 'grep'], prompt: 'go' },
+      { title: 'x', agent: 'inline', systemPrompt: 'You audit logs.', ownPrompt: true, model: 'kortix/fast', tools: ['read', 'write', 'grep'], prompt: 'go' },
       fast,
     )
     expect(result.model).toEqual({ providerID: 'kortix', modelID: 'fast' })
-    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({
+    const body = calls.find((c) => c.method === 'POST')!.body
+    expect(body).toMatchObject({
+      // The parent's own agent: the child has exactly the parent's access.
       agent_name: 'builder',
       model: 'kortix/fast',
-      initial_context: 'You audit logs.',
+      // The instructions are the child's system prompt, not a note in its first message.
       // `write` is dropped: the parent itself may not use it.
-      runtime_context: { 'kortix.subagent.depth': 2, 'kortix.subagent.tools': 'read,grep' },
+      runtime_context: { 'kortix.subagent.depth': 2, 'kortix.subagent.tools': 'read,grep', 'kortix.agent.instructions': 'You audit logs.' },
     })
+    expect(body).not.toHaveProperty('initial_context')
   })
 
   test('a named agent with a model override: the child runs as that agent on that model, narrowed to the parent tools; its own prompt stays its own', async () => {
@@ -180,8 +210,40 @@ describe('cloudSpawnSession — create', () => {
       error: 'child session did not settle within 1 min; the child session was stopped',
     })
     // The slot is freed only because the child no longer runs.
-    expect(calls.some((c) => c.method === 'POST' && c.url === 'https://api.example.com/v1/projects/proj-1/sessions/child-1/stop')).toBe(true)
+    expect(calls.some((c) => c.method === 'POST' && c.url === 'https://api.example.com/v1/workspaces/proj-1/sessions/child-1/stop')).toBe(true)
     expect(parent.live.count).toBe(0)
+  })
+
+  test('a colleague with its own access sends the list on the create', async () => {
+    const { impl, calls } = fakeApi({ rows: [IDLE], transcript: report('done') })
+    await cloudSpawnSession(
+      api(impl, { parentAgent: 'mykortix', coordinator: true }),
+      { title: 'x', agent: 'inline', systemPrompt: 'You check invoices.', ownPrompt: true, access: { connectors: ['gmail'], secrets: ['STRIPE_KEY'] }, prompt: 'go' },
+      fast,
+    )
+    const body = calls.find((c) => c.method === 'POST')!.body
+    expect(body.colleague_access).toEqual({ connectors: ['gmail'], secrets: ['STRIPE_KEY'] })
+    expect(body.agent_name).toBe('mykortix')
+  })
+
+  test('a colleague whose access waits for the person: no child, the API text, not an error', async () => {
+    const pending = { error: 'The person must allow this colleague access first (connector gmail).', code: 'COLLEAGUE_ACCESS_APPROVAL_REQUIRED', ask_id: 'access:a1' }
+    const { impl, calls } = fakeApi({ create: { status: 409, body: pending } })
+    const result = await cloudSpawnSession(
+      api(impl, { parentAgent: 'mykortix', coordinator: true }),
+      { title: 'x', agent: 'inline', systemPrompt: 'You check invoices.', ownPrompt: true, access: { connectors: ['gmail'], secrets: [] }, prompt: 'go' },
+      fast,
+    )
+    expect(result).toMatchObject({ sessionId: '', status: 'awaiting_approval', text: pending.error, askId: 'access:a1' })
+    // Nothing was polled: no child exists.
+    expect(calls.filter((c) => c.method === 'GET' && !new URL(c.url).pathname.endsWith('/sessions'))).toEqual([])
+  })
+
+  test('any other 409 on the create is still an error', async () => {
+    const { impl } = fakeApi({ create: { status: 409, body: { error: 'My Kortix is off in this project.', code: 'builtin_agent_disabled' } } })
+    const result = await cloudSpawnSession(api(impl), { title: 'x', agent: 'general', systemPrompt: '', prompt: 'go' }, fast)
+    expect(result.status).toBe('error')
+    expect(result.error).toContain('builtin_agent_disabled')
   })
 
   test('a failed child session returns error', async () => {
@@ -235,7 +297,11 @@ describe('cloudSpawnSession — create', () => {
   test('inline instructions over the API cap are refused before any session exists', async () => {
     const { impl, calls } = fakeApi({})
     await expect(
-      cloudSpawnSession(api(impl), { title: 'x', agent: 'inline', systemPrompt: 'x'.repeat(8_193), prompt: 'go' }, fast),
+      cloudSpawnSession(api(impl), { title: 'x', agent: 'inline', systemPrompt: 'x'.repeat(4_097), ownPrompt: true, prompt: 'go' }, fast),
+    ).rejects.toThrow('Inline agent instructions are 4097 characters; a separate subagent session takes at most 4096.')
+    // A note beside the agent's own prompt keeps the initial_context cap.
+    await expect(
+      cloudSpawnSession(api(impl), { title: 'x', agent: 'general', systemPrompt: 'x'.repeat(8_193), prompt: 'go' }, fast),
     ).rejects.toThrow('at most 8192')
     expect(calls).toEqual([])
   })
@@ -296,7 +362,7 @@ describe('cloudSpawnSession — background', () => {
       runtime_context: { 'kortix.subagent.depth': 1 },
     })
     // No wait, no read-back: only the child list (the cap) and the create.
-    expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(['GET /v1/projects/proj-1/sessions', 'POST /v1/projects/proj-1/sessions'])
+    expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(['GET /v1/workspaces/proj-1/sessions', 'POST /v1/workspaces/proj-1/sessions'])
     expect(parent.live.count).toBe(0)
   })
 
@@ -332,7 +398,7 @@ describe('cloudSpawnSession — background', () => {
     const { impl, calls } = fakeApi({ rows: [own] })
     const result = await cloudSpawnSession(api(impl), { sessionId: 'child-7', title: 'x', agent: 'general', systemPrompt: '', prompt: 'now the tests' }, fast)
     expect(result).toMatchObject({ sessionId: 'child-7', status: 'started' })
-    expect(calls.find((c) => c.method === 'POST')!.url).toBe('https://api.example.com/v1/projects/proj-1/sessions/child-7/prompts')
+    expect(calls.find((c) => c.method === 'POST')!.url).toBe('https://api.example.com/v1/workspaces/proj-1/sessions/child-7/prompts')
     expect(calls.some((c) => c.url.includes('/transcript'))).toBe(false)
   })
 })
@@ -345,7 +411,7 @@ describe('cloudSpawnSession — task_id resume', () => {
     const result = await cloudSpawnSession(api(impl), { sessionId: 'child-7', title: 'x', agent: 'general', systemPrompt: '', prompt: 'and the tests?' }, fast)
     expect(result).toMatchObject({ sessionId: 'child-7', status: 'completed', text: 'follow-up done' })
     const prompt = calls.find((c) => c.method === 'POST')!
-    expect(prompt.url).toBe('https://api.example.com/v1/projects/proj-1/sessions/child-7/prompts')
+    expect(prompt.url).toBe('https://api.example.com/v1/workspaces/proj-1/sessions/child-7/prompts')
     expect(prompt.body.parts).toEqual([{ type: 'text', text: 'and the tests?' }])
     expect(typeof prompt.body.client_message_id).toBe('string')
     expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/sessions'))).toBe(false)
@@ -402,6 +468,15 @@ describe('subagent context and target', () => {
     })
     // A present but empty list narrows to nothing, never to everything.
     expect(subagentContextFrom(JSON.stringify({ 'kortix.subagent.tools': '' }))).toEqual({ depth: 0, tools: [] })
+  })
+
+  test('subagentContextFrom reads the instructions an inline agent runs on; blank or non-string is none', () => {
+    expect(subagentContextFrom(JSON.stringify({ 'kortix.subagent.depth': 1, 'kortix.agent.instructions': '  You are a product designer.  ' }))).toEqual({
+      depth: 1,
+      instructions: 'You are a product designer.',
+    })
+    expect(subagentContextFrom(JSON.stringify({ 'kortix.agent.instructions': '   ' }))).toEqual({ depth: 0 })
+    expect(subagentContextFrom(JSON.stringify({ 'kortix.agent.instructions': 7 }))).toEqual({ depth: 0 })
   })
 
   test('childToolAllowlist only ever narrows', () => {
@@ -476,7 +551,7 @@ describe('cloudSpawnSession — names, teammates, forks', () => {
     }
     const free = fakeApi({ children: [{ ...holder, status: 'failed' }] })
     expect((await cloudSpawnSession(api(free.impl), { title: 'x', agent: 'general', systemPrompt: '', prompt: 'go', background: true, handle: 'reviewer' }, fast)).status).toBe('started')
-    expect(free.calls.find((c) => c.method === 'POST')!.url).toBe('https://api.example.com/v1/projects/proj-1/sessions')
+    expect(free.calls.find((c) => c.method === 'POST')!.url).toBe('https://api.example.com/v1/workspaces/proj-1/sessions')
   })
 
   test('the name of a finished child is a follow-up to that child: no new session, the same session gets the prompt', async () => {
@@ -486,7 +561,7 @@ describe('cloudSpawnSession — names, teammates, forks', () => {
       const result = await cloudSpawnSession(api(impl), { title: 'Clean up', agent: 'general', systemPrompt: 'p', prompt: 'now remove the dead config', background: true, handle: 'Manifest-Upgrader' }, fast)
       expect(result).toEqual({ sessionId: 'child-9', status: 'started', text: '', model: { providerID: 'kortix', modelID: 'default' }, continued: true })
       const posts = calls.filter((c) => c.method === 'POST')
-      expect(posts.map((c) => c.url)).toEqual(['https://api.example.com/v1/projects/proj-1/sessions/child-9/prompts'])
+      expect(posts.map((c) => c.url)).toEqual(['https://api.example.com/v1/workspaces/proj-1/sessions/child-9/prompts'])
       expect(posts[0]!.body.parts).toEqual([{ type: 'text', text: 'now remove the dead config' }])
     }
   })
@@ -504,7 +579,7 @@ describe('cloudSpawnSession — names, teammates, forks', () => {
     const mate = fakeApi({ children: [finished], rows: [finished] })
     const resumed = await cloudSpawnSession(api(mate.impl), { title: 'x', agent: 'general', systemPrompt: '', prompt: 'one more source', teammate: { lead: PARENT, handle: 'researcher', instructions: 'You are a teammate.' } }, fast)
     expect(resumed).toMatchObject({ sessionId: 'child-9', status: 'started', continued: true })
-    expect(mate.calls.filter((c) => c.method === 'POST').map((c) => new URL(c.url).pathname)).toEqual(['/v1/projects/proj-1/sessions/child-9/prompts'])
+    expect(mate.calls.filter((c) => c.method === 'POST').map((c) => new URL(c.url).pathname)).toEqual(['/v1/workspaces/proj-1/sessions/child-9/prompts'])
 
     const fork = fakeApi({ children: [finished] })
     await expect(cloudSpawnSession(api(fork.impl), { title: 'x', agent: 'inline', systemPrompt: 'f', prompt: 'try B', background: true, fork: true, handle: 'researcher' }, fast)).rejects.toThrow(
@@ -577,7 +652,7 @@ describe('cloudStopChild — task_stop', () => {
     ]
     const { impl, calls } = fakeApi({ children })
     expect(await cloudStopChild(api(impl), { name: '@reviewer' })).toEqual({ sessionId: 'child-2', handle: 'reviewer', title: 'Review', stopped: true })
-    expect(calls.filter((c) => c.method === 'POST').map((c) => new URL(c.url).pathname)).toEqual(['/v1/projects/proj-1/sessions/child-2/stop'])
+    expect(calls.filter((c) => c.method === 'POST').map((c) => new URL(c.url).pathname)).toEqual(['/v1/workspaces/proj-1/sessions/child-2/stop'])
   })
 
   test('by id: only a child of this session; one that already ended is not stopped again', async () => {
@@ -701,14 +776,14 @@ describe('the router (front.ts) — routing', () => {
     expect(section).toContain(`${'d'.repeat(239)}…`)
   })
 
-  test('fetchFrontAgents reads /v1/projects/:id/detail with the box token, and answers null on a failure', async () => {
+  test('fetchFrontAgents reads /v1/workspaces/:id/detail with the box token, and answers null on a failure', async () => {
     const seen: Array<{ url: string; auth: string | null }> = []
     const ok = (async (url: string, init?: RequestInit) => {
       seen.push({ url, auth: new Headers(init?.headers).get('authorization') })
       return Response.json({ config: { agents: [{ name: 'researcher' }] } })
     }) as unknown as typeof fetch
     expect(await fetchFrontAgents({ apiUrl: 'http://api.test/v1/', projectId: 'proj 1', token: 'tok' }, ok)).toEqual([{ name: 'researcher' }])
-    expect(seen).toEqual([{ url: 'http://api.test/v1/projects/proj%201/detail', auth: 'Bearer tok' }])
+    expect(seen).toEqual([{ url: 'http://api.test/v1/workspaces/proj%201/detail', auth: 'Bearer tok' }])
     const down = (async () => new Response('no', { status: 503 })) as unknown as typeof fetch
     expect(await fetchFrontAgents({ apiUrl: 'http://api.test', projectId: 'p', token: 't' }, down)).toBeNull()
     const thrown = (async () => {
@@ -764,7 +839,7 @@ describe('cloudChildToolDetails: a child\'s saved tool details come from its ses
   test('returns the details of each completed call of the tool, oldest first, and reads only the log', async () => {
     const { impl, urls } = fake(PARENT)
     expect(await cloudChildToolDetails(api(impl), CHILD, 'workflow')).toEqual([{ run: 'doc-1' }])
-    expect(urls).toEqual([`/v1/projects/proj-1/sessions/${CHILD}`, `/v1/projects/proj-1/sessions/${CHILD}/log?limit=40`])
+    expect(urls).toEqual([`/v1/workspaces/proj-1/sessions/${CHILD}`, `/v1/workspaces/proj-1/sessions/${CHILD}/log?limit=40`])
   })
 
   test('a session that is not this session\'s child answers null and reads no log', async () => {

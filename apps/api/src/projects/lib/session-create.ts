@@ -30,7 +30,7 @@ import {
   toSessionModelRef,
 } from '../../llm-gateway/resolution/effective';
 import { checkClaudeAgentRef } from '../../llm-gateway/resolution/claude-agent';
-import { claudeSubscriptionRequiredBody, missingClaudeSubscription } from '../claude-subscription/gate';
+import { claudeSubscriptionRequiredBody, missingClaudeSubscription, promptModelRef } from '../claude-subscription/gate';
 
 import { selectProvider } from '../../platform/services/provider-balancer';
 import { ProvisionTimeline } from '../../platform/services/provision-timeline';
@@ -112,6 +112,20 @@ import type { Actor } from '../../iam/actor';
 import { loadVisibleSession, sessionIsTombstoned } from './session-visibility';
 import { HUMAN_SESSION_SURFACES } from './session-surface';
 import { isWorkflowRunnerContext, sessionIsWorkflowRunner } from './workflow-runner';
+import { isInlineColleagueContext } from './inline-colleague';
+import {
+  askColleagueAccess,
+  checkColleagueAccessItems,
+  type ColleagueAccess,
+  colleagueAccessHash,
+  colleagueAccessPendingText,
+  consumeColleagueAccessAllow,
+  COLLEAGUE_ACCESS_APPROVAL_REQUIRED,
+  findColleagueAccessAllow,
+  parseColleagueAccess,
+} from './colleague-access';
+import { surfaceSessionIdOf } from './session-asks';
+import { childSessionLimitRefusal } from './child-session-limit';
 import type { SessionInvocationSource } from '../session-lifecycle/types';
 import { captureProductEvent } from '../../shared/product-analytics';
 /** Every status a failed create answers with. Routes that create a session
@@ -541,6 +555,7 @@ async function resolveSessionAgent(params: {
     agentName: string;
     platformMetaAgent: boolean;
     repositoryAccess: boolean;
+    myKortixColleague: boolean;
   }>
 > {
   const { input, projectId } = params;
@@ -592,7 +607,7 @@ async function resolveSessionAgent(params: {
   // A session that names no agent runs `default_agent`. A project that runs My
   // Kortix and sets no `default_agent` runs My Kortix; the mirrored default is
   // not read then, since it can name an agent the file turned off.
-  let agentName =
+  const agentName =
     metaAgentEnabled && !requestedAgent && !manifestDefaultAgent && !callerIsMeta
       ? MY_KORTIX_AGENT_NAME
       : resolveSessionAgentName({
@@ -600,11 +615,6 @@ async function resolveSessionAgent(params: {
           manifestDefaultAgent,
           mirroredDefaultAgent,
         });
-  // My Kortix starting a session without naming an agent, in a project whose
-  // `default_agent` is My Kortix: the first enabled primary agent the file declares.
-  if (callerIsMeta && !requestedAgent && isMyKortixAgentName(agentName)) {
-    agentName = loadedAgents.specs.find((spec) => spec.enabled && !spec.subagent)?.name ?? agentName;
-  }
   // kortix.yaml is not YAML: repair mode. Only My Kortix runs, so the file can
   // be fixed. Any other agent is a typed refusal that names the error, never a 500.
   if (loadedAgents.manifestSyntaxError && !isMyKortixAgentName(agentName)) {
@@ -661,7 +671,26 @@ async function resolveSessionAgent(params: {
       };
     }
   }
-  if (platformMetaAgent && callerIsMeta && !myKortixWorkflowRunner && !frontWorker) {
+  // My Kortix names who works: a project agent, or itself for a colleague or a
+  // workflow runner. Nothing is picked for it from `default_agent` or the order
+  // of the agents: an unnamed child is refused with the agents to name. A
+  // router's worker is the exception: the router picks by space (above).
+  if (callerIsMeta && !requestedAgent && !callerIsFront && !isWorkflowRunnerContext(body.runtime_context)) {
+    const agents = loadedAgents.specs.filter((spec) => spec.enabled && !spec.subagent).map((spec) => spec.name);
+    return {
+      error: {
+        status: 400,
+        body: {
+          error: `A session My Kortix starts names its agent: ${agents.join(', ') || 'none is declared'}. To start a colleague, give the agent tool inline instructions, and list the connectors and secrets it needs.`,
+          code: 'AGENT_REQUIRED',
+          agents,
+        },
+      },
+    };
+  }
+  // An inline colleague (inline-colleague.ts) has My Kortix's own access, the list a person allowed it, and its own prompt.
+  const myKortixColleague = platformMetaAgent && callerIsMeta && isInlineColleagueContext(body.runtime_context);
+  if (platformMetaAgent && callerIsMeta && !myKortixWorkflowRunner && !frontWorker && !myKortixColleague) {
     return {
       error: {
         status: 400,
@@ -685,7 +714,79 @@ async function resolveSessionAgent(params: {
       },
     };
   }
-  return { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent, repositoryAccess };
+  return { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent, repositoryAccess, myKortixColleague };
+}
+
+/**
+ * The connectors and secrets My Kortix hands this colleague
+ * (colleague-access.ts), checked with the request: the shape, that the caller
+ * is My Kortix starting a colleague, and that every item exists. Null: no
+ * access asked. Records nothing.
+ */
+async function checkColleagueAccessForCreate(params: {
+  input: CreateProjectSessionInput;
+  projectId: string;
+  colleague: boolean;
+}): Promise<SessionCreateStep<{ colleagueAccess: ColleagueAccess | null }>> {
+  const { input, projectId } = params;
+  const parsed = parseColleagueAccess(input.body.colleague_access);
+  if (!parsed.ok) return { error: { status: 400, body: { error: parsed.error, code: 'INVALID_COLLEAGUE_ACCESS' } } };
+  if (!parsed.value) return { colleagueAccess: null };
+  if (!params.colleague || !input.callerSessionId) {
+    return {
+      error: {
+        status: 400,
+        body: {
+          error: 'colleague_access is only for a colleague My Kortix starts: the agent tool with inline instructions. A project agent brings its own access.',
+          code: 'COLLEAGUE_ACCESS_NOT_ALLOWED',
+        },
+      },
+    };
+  }
+  const checked = await checkColleagueAccessItems({ projectId, userId: input.userId, access: parsed.value });
+  if (!checked.ok) return { error: { status: checked.status, body: checked.body } };
+  return { colleagueAccess: checked.access };
+}
+
+/**
+ * The person's allow of this exact list for the calling session: its id, used
+ * in the insert. Without one, an ask for the person, and a 409 no session
+ * follows. The last step before the row, so nothing after it refuses a start
+ * the person was just asked about.
+ */
+async function resolveColleagueAccessApproval(params: {
+  input: CreateProjectSessionInput;
+  projectId: string;
+  accountId: string;
+  access: ColleagueAccess | null;
+}): Promise<SessionCreateStep<{ colleagueAccessAllowId: string | null }>> {
+  const { input, projectId, accountId, access } = params;
+  if (!access || !input.callerSessionId) return { colleagueAccessAllowId: null };
+  const accessHash = colleagueAccessHash(access);
+  const allowId = await findColleagueAccessAllow(input.callerSessionId, accessHash);
+  if (allowId) return { colleagueAccessAllowId: allowId };
+  const title = (normalizeString(input.body.name) ?? 'A colleague').replace(/ \(inline agent\)$/, '');
+  const ask = await askColleagueAccess({
+    accountId,
+    projectId,
+    sessionId: input.callerSessionId,
+    surfaceSessionId: await surfaceSessionIdOf(input.callerSessionId),
+    title,
+    access,
+    accessHash,
+  });
+  return {
+    error: {
+      status: 409,
+      body: {
+        error: colleagueAccessPendingText(access),
+        code: COLLEAGUE_ACCESS_APPROVAL_REQUIRED,
+        ask_id: `access:${ask.id}`,
+        connectors: access.connectors,
+        secrets: access.secrets,
+      },
+    },
+  };
 }
 
 /**
@@ -744,7 +845,9 @@ async function resolveSessionModel(params: {
   //
   // Runs BEFORE the billing hold so a bad model never costs a credit
   // reservation. Mirrors the channel-model gate (routes/channel-bindings.ts).
-  const requestedModel = normalizeString(body.model);
+  // `opencode_model` is the pin an old CLI (v0.13.0–v0.14.19) sends beside
+  // `model`; `model` wins (see SessionCreateInputSchema).
+  const requestedModel = normalizeString(body.model ?? body.opencode_model);
   let sessionModel: string | null = null;
   let sessionModelSource: ModelSource | null = null;
   if (requestedModel) {
@@ -1320,6 +1423,8 @@ async function insertSessionAndBindings(
     pendingPromptConversion: PendingPromptConversion | null;
     inheritedGrants: SecretGrant[];
     spaceId: string | null;
+    /** A person's allow of this colleague's access, used once here (colleague-access.ts). */
+    colleagueAccessAllowId: string | null;
   },
   runtimeContext: SessionRuntimeContextValue,
   connectorBindings: ValidatedSessionConnectorBindings,
@@ -1344,6 +1449,7 @@ async function insertSessionAndBindings(
     pendingPromptConversion,
     inheritedGrants,
     spaceId,
+    colleagueAccessAllowId,
   } = params;
   const { userId, body } = input;
   return db.transaction(async (tx) => {
@@ -1467,6 +1573,15 @@ async function insertSessionAndBindings(
           principalId: g.principalId,
         })),
       );
+    }
+    // The allow and the colleague land together: a failed create leaves it unused, a second start cannot reuse it.
+    if (colleagueAccessAllowId) {
+      const used = await consumeColleagueAccessAllow(tx, { id: colleagueAccessAllowId, colleagueSessionId: sessionId });
+      if (!used) {
+        throw new HTTPException(409, {
+          message: 'Another start used this access approval first. Start the colleague again; the person is asked again.',
+        });
+      }
     }
     return row;
   });
@@ -1754,6 +1869,11 @@ export async function createProjectSession(input: {
     const parent = await loadVisibleSession({ row: project, userId, actor: input.parentActor }, parentId.data, null, null);
     if (!parent || sessionIsTombstoned(parent.row)) return { error: { status: 404, body: { error: 'Not found' } } };
   }
+  // A session starting its own child: the cap on children per window (child-session-limit.ts), before any side effect.
+  if (input.callerSessionId) {
+    const limited = await childSessionLimitRefusal(input.callerSessionId, projectId);
+    if (limited) return { error: limited };
+  }
 
   // The id first: a /workspace-volume session starts opening its volume now,
   // so the open runs alongside the checks below instead of before the box create.
@@ -1839,6 +1959,9 @@ export async function createProjectSession(input: {
   const agent = await resolveSessionAgent({ input, projectId, channelAgents });
   if (agent.error) return { error: agent.error };
   const { loadedAgents, projectDefaultAgent, agentName, platformMetaAgent, repositoryAccess } = agent;
+  const colleagueAccessCheck = await checkColleagueAccessForCreate({ input, projectId, colleague: agent.myKortixColleague });
+  if (colleagueAccessCheck.error) return { error: colleagueAccessCheck.error };
+  const { colleagueAccess } = colleagueAccessCheck;
 
   const model = await resolveSessionModel({
     input,
@@ -1925,6 +2048,11 @@ export async function createProjectSession(input: {
     return billingCheck;
   }
 
+  // Last check before the row: a list that waits for a person records an ask, so nothing after it may refuse.
+  const approval = await resolveColleagueAccessApproval({ input, projectId, accountId, access: colleagueAccess });
+  if (approval.error) return { error: approval.error };
+  const { colleagueAccessAllowId } = approval;
+
   if (typeof body.fork_from_session_id === 'string') {
     if (!config.SESSION_LOG_RESTORE_ENABLED || !config.SESSION_LOG_INGEST_ENABLED) {
       return { error: { status: 503, body: { error: 'Session log restore is off' } } };
@@ -2003,6 +2131,7 @@ export async function createProjectSession(input: {
         pendingPromptConversion,
         inheritedGrants,
         spaceId,
+        colleagueAccessAllowId,
       },
       runtimeContext,
       validatedConnectorBindings.bindings,
@@ -2057,6 +2186,28 @@ export async function createProjectSession(input: {
         with_prompt: Boolean(body.pending_prompt ?? body.initial_prompt),
       },
     });
+    // The first prompt rides inside the create on the workspace home, mobile
+    // and the sessions board, and never reaches the prompt POST that reports
+    // every later one. Same properties as that route.
+    const createPrompt = pendingPromptConversion?.rowValues ?? null;
+    if (createPrompt || initialPrompt) {
+      const pendingModel = (body.pending_prompt as Record<string, unknown> | undefined)?.model;
+      const parts = (createPrompt?.payload as { parts?: Array<{ type?: unknown }> } | undefined)?.parts ?? [];
+      captureProductEvent({
+        userId: input.userId,
+        accountId,
+        event: 'prompt_sent',
+        dedupeKey: createPrompt?.idempotencyKey ?? `prompt:${sessionId}:initial`,
+        properties: {
+          project_id: projectId,
+          session_id: sessionId,
+          model: promptModelRef(pendingModel) ?? sessionModel ?? 'default',
+          attachment_count: parts.filter((part) => part.type === 'file').length,
+          source: source === 'ui' ? 'web' : typeof source === 'string' ? source : null,
+          at_create: true,
+        },
+      });
+    }
   }
 
   // A prompt supplied at create is claimed by the session daemon. This is the

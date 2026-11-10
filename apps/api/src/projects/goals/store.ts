@@ -6,10 +6,11 @@
  * the same transaction bumps `revision` (and `generation` when asked) and
  * appends one `project_goal_events` row. A refusal writes nothing.
  */
-import { projectGoalEvents, projectGoals, projects } from '@kortix/db';
+import { projectGoalEvents, projectGoals } from '@kortix/db';
 import { and, desc, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
 import { resolveFeatureFlag } from '../../feature-flags/registry';
 import { db } from '../../shared/db';
+import { projectsView } from '../../workspaces/rows';
 
 export type GoalRow = typeof projectGoals.$inferSelect;
 export type GoalEventRow = typeof projectGoalEvents.$inferSelect;
@@ -43,11 +44,6 @@ export async function getGoal(projectId: string, goalId: string): Promise<GoalRo
     .from(projectGoals)
     .where(and(eq(projectGoals.projectId, projectId), eq(projectGoals.goalId, goalId)))
     .limit(1);
-  return row ?? null;
-}
-
-export async function getGoalById(goalId: string): Promise<GoalRow | null> {
-  const [row] = await db.select().from(projectGoals).where(eq(projectGoals.goalId, goalId)).limit(1);
   return row ?? null;
 }
 
@@ -91,7 +87,7 @@ export async function goalOfSession(sessionId: string): Promise<GoalRow | null> 
 
 /** Is the project's `goals` flag on, read the way the routes and the admission gate read it? */
 export async function goalFlagOn(projectId: string): Promise<boolean> {
-  const [row] = await db.select({ metadata: projects.metadata }).from(projects).where(eq(projects.projectId, projectId)).limit(1);
+  const [row] = await db.select({ metadata: projectsView.metadata }).from(projectsView).where(eq(projectsView.projectId, projectId)).limit(1);
   return row ? resolveFeatureFlag(row.metadata, 'goals') : false;
 }
 
@@ -127,15 +123,6 @@ async function insertEvent(tx: Tx, goal: GoalRow, event: GoalEventInput, from: s
 /** An event with no row change (a refused wake, a notification marker). False: its dedupe key already exists. */
 export async function appendGoalEvent(goal: GoalRow, event: GoalEventInput): Promise<boolean> {
   return db.transaction((tx) => insertEvent(tx, goal, event, goal.state, goal.state));
-}
-
-export async function goalEventExists(goalId: string, dedupeKey: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: projectGoalEvents.id })
-    .from(projectGoalEvents)
-    .where(and(eq(projectGoalEvents.goalId, goalId), eq(projectGoalEvents.dedupeKey, dedupeKey)))
-    .limit(1);
-  return Boolean(row);
 }
 
 export type GoalPatch = Partial<Omit<typeof projectGoals.$inferInsert, 'goalId' | 'projectId' | 'revision' | 'generation'>>;

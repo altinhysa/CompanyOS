@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { KortixToolResult } from '@kortix/api-contract/kortix-tool-card'
 import { PLATFORM_TOOLS, loadTools, runTool } from '@/services/tools/host'
-import { runKortix } from '@/services/tools/platform/platform'
+import { adminHref, runKortix } from '@/services/tools/platform/platform'
+import { isWorkspaceSettingsSection, workspaceSettingsPath } from '@kortix/shared/workspace-settings'
 
 /**
  * The My Kortix platform tools (services/tools/platform/kortix_*.ts) at their
@@ -61,7 +62,7 @@ describe('kortix_agents', () => {
     const result = await run('kortix_agents', { action: 'list' })
     expect(result.ok).toBe(true)
     expect(result.card.title).toBe('2 agents')
-    expect(result.card.rows?.[0]).toEqual({ title: 'researcher', detail: 'Digs into a topic', href: '/projects/proj_1/customize/agents/researcher' })
+    expect(result.card.rows?.[0]).toEqual({ title: 'researcher', detail: 'Digs into a topic', href: '/workspaces/proj_1/admin/agents/researcher' })
     expect(result.card.rows?.[1]?.badge).toBe('built in')
     // My Kortix has no agent page (the project home starts it): its row links nowhere.
     expect(result.card.rows?.[1]?.href).toBeUndefined()
@@ -119,7 +120,7 @@ describe('kortix_agents', () => {
     expect(result.error?.kind).toBe('denied')
     expect(result.error?.message).toContain('project.agent.update')
     expect(result.error?.grantors).toEqual([
-      { name: 'Sam', role: 'project manager' },
+      { name: 'Sam', role: 'manager' },
       { name: 'ada@example.com', role: 'owner' },
     ])
     expect(result.card.subtitle).toBe('Sam, ada@example.com can grant it.')
@@ -316,6 +317,8 @@ describe('kortix_schedules follow-through', () => {
     // The example is a whole call the model can copy.
     const example = missing.error!.message.slice(missing.error!.message.indexOf('{'))
     expect(JSON.parse(example)).toMatchObject({ action: 'follow_up', in: '4d' })
+    // The card is the person's: the model's instructions and example never reach it.
+    expect(missing.card).toEqual({ title: 'The agent left out a required detail', status: 'error' })
     expect((await run('kortix_schedules', { action: 'wake_on', on: 'cr_merged', cr: '42' })).error?.message).toContain('{"action":"wake_on"')
     expect(argvs()).toHaveLength(2)
   })
@@ -363,6 +366,20 @@ describe('kortix_schedules follow-through', () => {
     expect(result.card.rows?.map((row) => row.detail)).toEqual(['Follow-up · every 3h · next 2026-10-31 15:00 UTC', 'Wakes when change request 42 merges', '0 9 * * 1 · next 2026-11-02 09:00 UTC'])
   })
 
+  test('list with one unreadable source: the card says which in plain words, the reason goes to the model in data.errors', async () => {
+    fakeKortix(`'triggers ls --json') echo '{"triggers":[],"runtime":[]}' ;;`)
+    const result = await run('kortix_schedules', { action: 'list' })
+    expect(result.card.subtitle).toBe("This session's follow-ups could not be read.")
+    expect(typeof (result.data as { errors?: { follow_ups?: unknown } }).errors?.follow_ups).toBe('string')
+  })
+
+  test('an automate argument check reads as an incomplete call on the card', async () => {
+    fakeKortix('')
+    const result = await run('kortix_schedules', { action: 'automate', name: 'Not A Slug', on: 'schedule', every: '1d', agent: 'writer', prompt: 'x' })
+    expect(result.card).toEqual({ title: 'The agent left out a required detail', status: 'error' })
+    expect(result.error?.message).toContain('`name` is a short id')
+  })
+
   test('remove routes by id: reminder.<id> → kortix loops, trigger.<id> → kortix triggers, a kortix.yaml slug → --apply; delete is an alias; pause and resume work for loops', async () => {
     fakeKortix(`'loops rm reminder.aaaaaaaaaaaa') echo 'Removed' ;;
   'triggers rm trigger.cccccccccccc') echo 'Removed' ;;
@@ -392,7 +409,7 @@ describe('kortix_schedules follow-through', () => {
     fakeKortix(`'loop ${TEXT} --every=4h --json') echo '✗ Loops is not enabled for this project. Enable it in Settings → Feature flags.' >&2; echo '  Turn it on: kortix projects features enable reminders' >&2; exit 1 ;;`)
     const result = await run('kortix_schedules', { action: 'follow_up', text: TEXT, every: '4h' })
     expect(result.ok).toBe(false)
-    expect(result.error?.message).toBe('Loops is not enabled for this project. Enable it in Settings → Feature flags. Ask the person or a project admin to turn it on.')
+    expect(result.error?.message).toBe('Loops is not enabled for this project. Enable it in Settings → Feature flags. Ask the person or a workspace admin to turn it on.')
   })
 })
 
@@ -409,6 +426,42 @@ describe('kortix_people and kortix_access', () => {
     fakeKortix(ROSTER)
     const result = await run('kortix_access', { action: 'who_can_grant' })
     expect(result.card.rows?.map((row) => row.title)).toEqual(['Sam', 'ada@example.com'])
+    expect(result.card.links).toEqual([{ label: 'Members', href: '/workspaces/proj_1/admin/members' }])
+  })
+
+  test('me: one workspace role row, the workspace title, the older JSON fields kept', async () => {
+    fakeKortix(`'whoami --json') echo '{"user_id":"u_ada","email":"ada@example.com","accounts":[{"account_id":"a_1","role":"owner"}]}' ;;
+  ${ROSTER}`)
+    const result = await run('kortix_access', { action: 'me' })
+    expect(result.card.title).toBe('You manage this workspace')
+    expect(result.card.rows).toEqual([
+      { title: 'Signed in as', detail: 'ada@example.com' },
+      { title: 'Workspace role', detail: 'owner' },
+    ])
+    expect(result.data).toMatchObject({ workspace_role: 'owner', account_role: 'owner', project_role: 'manager', workspace_id: 'proj_1', project_id: 'proj_1' })
+  })
+
+  test('me: a member reads as a member of this workspace', async () => {
+    fakeKortix(`'whoami --json') echo '{"user_id":"u_me","email":"lee@example.com","accounts":[{"account_id":"a_1","role":"member"}]}' ;;
+  ${ROSTER}`)
+    const result = await run('kortix_access', { action: 'me' })
+    expect(result.card.title).toBe('You are a member of this workspace')
+    expect(result.card.rows).toContainEqual({ title: 'Workspace role', detail: 'member' })
+    expect(JSON.stringify(result.card)).not.toMatch(/Account role|Project role/)
+  })
+
+  test('people list shows one workspace role per person', async () => {
+    fakeKortix(ROSTER)
+    const result = await run('kortix_people', { action: 'list' })
+    expect(result.card.rows?.map((row) => row.badge)).toEqual(['manager', 'owner', 'member'])
+  })
+
+  test('every Settings link a tool prints is the registry path (workspaceSettingsPath)', () => {
+    const env = { KORTIX_PROJECT_ID: 'proj_1' } as Parameters<typeof adminHref>[0]
+    for (const section of ['members', 'connectors', 'triggers', 'models', 'feature-flags', 'secrets', 'skills'] as const) {
+      expect(isWorkspaceSettingsSection(section)).toBe(true)
+      expect(adminHref(env, section)).toBe(workspaceSettingsPath('proj_1', section))
+    }
   })
 })
 
@@ -422,7 +475,7 @@ describe('kortix_change_requests', () => {
     const result = await run('kortix_change_requests', { action: 'list' })
     expect(result.ok).toBe(true)
     expect(result.card.title).toBe('1 open change request')
-    expect(result.card.rows).toEqual([{ title: '#3 Upgrade the manifest', detail: 'Sam', badge: 'open', href: '/projects/proj_1/review?id=cr%3Acr-uuid-3' }])
+    expect(result.card.rows).toEqual([{ title: '#3 Upgrade the manifest', detail: 'Sam', badge: 'open', href: '/workspaces/proj_1/inbox?view=review&id=cr%3Acr-uuid-3' }])
     expect(result.data).toEqual({
       change_requests: [{ number: 3, cr_id: 'cr-uuid-3', title: 'Upgrade the manifest', author: 'Sam', status: 'open', from: 'kortix/session-a', into: 'main', session_id: 'ses_9', opened_at: '2026-10-30T09:00:00.000Z' }],
     })
@@ -442,7 +495,7 @@ describe('kortix_change_requests', () => {
       { title: 'Status', badge: 'open' },
     ])
     expect(result.data).toMatchObject({ number: 3, files_changed: 2, additions: 3, deletions: 1, can_merge: true, conflicts: [] })
-    expect(result.card.links).toContainEqual({ label: 'Session that made it', href: '/projects/proj_1/sessions/ses_9' })
+    expect(result.card.links).toContainEqual({ label: 'Session that made it', href: '/workspaces/proj_1/sessions/ses_9' })
   })
 
   test('merge: an open one merges with its message as --message=<text>; a closed one is refused before any merge', async () => {
@@ -632,6 +685,9 @@ describe('kortix_schedules automate tolerance', () => {
     const result = await run('kortix_schedules', { action: 'automate', name: 'form-leads', on: 'webhook', secret_env: 'FORM_SECRET', prompt: 'Draft a reply.' })
     expect(result.ok).toBe(false)
     expect(result.card.title).toBe('FORM_SECRET needs saving for webhooks')
+    // The person saves it from the card: one link, a plain note, no model instruction.
+    expect(result.card.links).toEqual([{ label: 'Save secret', href: 'https://app.example.test/secret-intake/ksl_abc123' }])
+    expect(result.card.subtitle).toBe('Save the value on the linked page. It never passes through chat.')
     expect(result.error?.message).toContain('https://app.example.test/secret-intake/ksl_abc123')
     expect((result as { data?: { secret_intake_url?: string } }).data?.secret_intake_url).toBe('https://app.example.test/secret-intake/ksl_abc123')
     expect(argvs()[1]).toBe('secrets request FORM_SECRET --scope=connector')
@@ -696,5 +752,22 @@ describe('runKortix', () => {
     chmodSync(join(bin, 'kortix'), 0o755)
     const result = await runKortix(['schedules', 'create', '--json'], { env: env() }, 'x'.repeat(1024 * 1024))
     expect(result.code).toBe(3)
+  })
+})
+
+describe('a failure card carries no text written for the model', () => {
+  test('fail(): an argument check reads as an incomplete call, a note shows, the message never does', async () => {
+    const { fail } = await import('@/services/tools/platform/platform')
+    const context = { env: {} }
+    const question = await fail('kortix_agents', 'create', 'Which agent?', { kind: 'invalid', message: 'Pass `name`.' }, context)
+    expect(question.card).toEqual({ title: 'The agent left out a required detail', status: 'error' })
+    expect(question.error).toEqual({ kind: 'invalid', message: 'Pass `name`.' })
+    const unknown = await fail('kortix_agents', 'nope', 'Unknown action', { kind: 'invalid', message: 'Use one of: list.' }, context)
+    expect(unknown.card.title).toBe('The agent left out a required detail')
+    // A server refusal of a well-formed call keeps its own title.
+    const conflict = await fail('kortix_agents', 'create', 'Could not create the agent', { kind: 'invalid', message: 'name taken (409)' }, context)
+    expect(conflict.card).toEqual({ title: 'Could not create the agent', status: 'error' })
+    const noted = await fail('kortix_memory', 'list', 'Memory is off in this workspace', { kind: 'failed', message: 'model text', note: 'Files is off.' }, context)
+    expect(noted.card).toEqual({ title: 'Memory is off in this workspace', subtitle: 'Files is off.', status: 'error' })
   })
 })

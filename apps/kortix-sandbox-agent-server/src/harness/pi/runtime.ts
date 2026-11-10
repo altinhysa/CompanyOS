@@ -74,6 +74,7 @@ import { PI_HARNESS_VERSION } from './version'
 import { promptImages } from './images'
 import type { PiSessionSnapshot } from './session-log'
 import { flushSessionLogJournal, reliveSessionLogMessage } from '../shared/session-log-journal'
+import { workspaceIdFromEnv } from '@/lib/config/workspace-id'
 
 export type { CompiledAgent }
 
@@ -2129,6 +2130,10 @@ export class PiRuntime {
       controlPlane: cloud !== null,
       background: input.background,
     })
+    // Access beyond this session's own is granted by the API to a new session: never dropped into an in-process child.
+    if (input.access && !(route.session === 'separate' && cloud)) {
+      throw new Error('An inline agent with its own connectors or secrets needs its own session, and this computer cannot start one. Do the work without that access, or name a project agent that has it.')
+    }
     if (route.session === 'separate' && cloud) {
       // The agent and its tools are read per call: a prompt may switch the agent (applyAgent).
       // The spread keeps the shared `live` counter.
@@ -2145,20 +2150,23 @@ export class PiRuntime {
   /**
    * What a cloud child inherits from the agent running now. `parentAgent` is
    * the RESOLVED agent (never the `default` sentinel, which the API could
-   * resolve to the platform coordinator), left out for the coordinator itself
-   * so the API picks the project default. `toolAllowlist` is every tool this
+   * resolve to the platform coordinator), the coordinator's own name
+   * included: a child that names no agent runs with this session's access,
+   * never with another agent's. `coordinator` marks My Kortix, whose own
+   * prompt never runs in a child (cloud-subagent.ts `buildCreateBody`). A
+   * router (front) sends neither, and the API picks. `toolAllowlist` is every tool this
    * agent may use (`rootToolAllowed`), sent for every child, named ones
    * included, so the child runs with intersection(its own tools, these).
    * Undefined = this agent is not narrowed at all.
    */
-  private cloudParent(): Pick<CloudSubagentApi, 'parentAgent' | 'toolAllowlist'> {
+  private cloudParent(): Pick<CloudSubagentApi, 'parentAgent' | 'toolAllowlist' | 'coordinator'> {
     // A front's worker gets every tool of its own agent, never narrowed to the front's.
     if (this.subagentContext.front) return { parentAgent: undefined, toolAllowlist: undefined }
-    const coordinator = this.env.KORTIX_META_AGENT === '1'
     const declared = Object.prototype.hasOwnProperty.call(this.compiled?.agent ?? {}, this.agentName)
     const narrowed = this.compiledAgent()?.tools !== undefined || this.subagentContext.tools !== undefined
     return {
-      parentAgent: !coordinator && declared ? this.agentName : undefined,
+      parentAgent: declared ? this.agentName : undefined,
+      ...(this.env.KORTIX_META_AGENT === '1' ? { coordinator: true } : {}),
       toolAllowlist: narrowed ? this.ownToolNames() : undefined,
     }
   }
@@ -2636,7 +2644,8 @@ export class PiRuntime {
     if (!child && this.subagentContext.watcher) return WATCHER_PROMPT
     // A router's own prompt leads; its agent's instructions, skills and capabilities follow, since it now works too.
     const front = !child && this.subagentContext.front
-    const parts = [front ? FRONT_PROMPT : child?.base || this.compiledAgent()?.prompt?.trim() || DEFAULT_SYSTEM_PROMPT]
+    // An inline agent's instructions (`kortix.agent.instructions`) replace its agent's own prompt.
+    const parts = [front ? FRONT_PROMPT : child?.base || this.subagentContext.instructions || this.compiledAgent()?.prompt?.trim() || DEFAULT_SYSTEM_PROMPT]
     // pi's own context-file format. pi's own loader stays off (`noContextFiles`): it reads `/workspace` and its ancestors, for the root only.
     if (this.instructions) parts.push(`<project_instructions path="${this.instructions.name}">\n${this.instructions.text}\n</project_instructions>`)
     // pi appends the working directory (and package skills) to the root's prompt.
@@ -2794,7 +2803,7 @@ export class PiRuntime {
     return {
       id: this.rootId,
       slug: this.rootId,
-      projectID: (this.env.KORTIX_PROJECT_ID ?? '').trim() || this.sessionId,
+      projectID: workspaceIdFromEnv(this.env) || this.sessionId,
       directory: this.workspace,
       title: this.title,
       version: PI_HARNESS_VERSION,

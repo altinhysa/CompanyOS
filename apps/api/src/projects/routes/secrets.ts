@@ -6,6 +6,7 @@
  * lib/secret-write-input.ts.
  */
 import { randomUUID } from 'node:crypto';
+import { isMyKortixAgentName } from '@kortix/shared';
 import { PROJECT_ACTIONS } from '../../iam';
 import { agentMayUseEnv, getAgentGrant, isBorrowedSessionPrincipal, isProjectSessionPrincipal } from '../../iam/agent-scope';
 import { auth, errors, json, lenientBody } from '../../openapi';
@@ -73,6 +74,7 @@ import { registerSecretRateLimitRoutes } from './secret-rate-limit';
 import { registerSecretPersonalRoutes } from './secret-personal';
 import { registerSecretSyncRoutes } from './secret-sync';
 import { capturePersonEvent } from './product-events';
+import { workspaceIdParam } from '../../shared/route-params';
 
 const SecretSharePrincipalSchema = z.object({
   /** `agent`: the id is the agent's service account (`/iam/agent-identities`). */
@@ -115,12 +117,12 @@ export function registerSecretsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'get',
-      path: '/{projectId}/secrets',
+      path: '/{workspaceId}/secrets',
       tags: ['secrets'],
       summary: 'List project secrets (names only, no values)',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string() }),
+          params: z.object({ workspaceId: z.string() }),
         },
       responses: {
           200: json(
@@ -145,7 +147,7 @@ export function registerSecretsRoutes(): void {
       },
     }),
     async (c: any) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const started = performance.now();
     const stages: Record<string, number> = {};
     const loaded = await loadProjectForUser(c, projectId, 'read');
@@ -223,7 +225,9 @@ export function registerSecretsRoutes(): void {
       agentGrants,
     }))
       .filter((item) => !item.system)
-      .filter((item) => agentMayUseEnv(agentGrant, item.identifier));
+      // My Kortix holds no secret but hands them to colleagues, a person approving each list
+      // (lib/colleague-access.ts): it reads the names. This route never returns a value.
+      .filter((item) => agentMayUseEnv(agentGrant, item.identifier) || isMyKortixAgentName(agentGrant?.agent ?? ''));
 
     // Audience of each shared value, for the person and agent this read acts
     // for. A value
@@ -290,14 +294,14 @@ export function registerSecretsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'post',
-      path: '/{projectId}/secrets',
+      path: '/{workspaceId}/secrets',
       tags: ['secrets'],
       summary: 'Set a project secret',
       description:
         'Create or update a project secret by `name` (upper-cased; A-Z, 0-9, _; max 64; KORTIX_* is reserved). The value is write-only: responses never echo it.',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string() }),
+          params: z.object({ workspaceId: z.string() }),
           body: {
             content: {
               'application/json': {
@@ -330,7 +334,7 @@ export function registerSecretsRoutes(): void {
       },
     }),
     async (c: any) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const body = await readJsonObject(c);
     const loaded = await loadProjectForUser(c, projectId, 'read');
     if (!loaded) return c.json({ error: 'Not found' }, 404);
@@ -573,12 +577,12 @@ export function registerSecretsRoutes(): void {
   projectsApp.openapi(
     createRoute({
       method: 'delete',
-      path: '/{projectId}/secrets/{name}',
+      path: '/{workspaceId}/secrets/{name}',
       tags: ['secrets'],
       summary: 'Delete a project secret',
       ...auth,
         request: {
-          params: z.object({ projectId: z.string(), name: z.string() }),
+          params: z.object({ workspaceId: z.string(), name: z.string() }),
         },
       responses: {
           200: json(z.any(), 'OK'),
@@ -586,7 +590,7 @@ export function registerSecretsRoutes(): void {
       },
     }),
     async (c: any) => {
-    const projectId = c.req.param('projectId');
+    const projectId = workspaceIdParam(c);
     const identifier = c.req.param('name')?.trim();
     const loaded = await loadProjectForUser(c, projectId, 'read');
     if (!loaded) return c.json({ error: 'Not found' }, 404);

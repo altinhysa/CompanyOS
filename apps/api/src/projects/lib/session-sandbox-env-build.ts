@@ -1,5 +1,5 @@
 
-import { projectSessions, projectSpaces, projects } from '@kortix/db';
+import { projectSessions, projectSpaces } from '@kortix/db';
 import { COMPILED_AGENT_CONFIG_ENV, fitsInEnvString } from '@kortix/api-contract/compiled-agent-config-env';
 import { eq } from 'drizzle-orm';
 
@@ -66,8 +66,10 @@ import { buildFeatureFlagSandboxEnv } from './feature-flag-env';
 import { resolveFeatureFlag } from '../../feature-flags/registry';
 import { buildSessionRuntimeEnv } from './session-runtime-env';
 import { buildMyKortixConfig } from './my-kortix-agent';
+import { readColleagueAccess } from './colleague-access';
 
 import { resolveSessionPersonalOwner } from './personal-resources';
+import { projectsView } from '../../workspaces/rows';
 
 
 /**
@@ -82,14 +84,14 @@ async function buildSessionChannelEnv(sessionId: string): Promise<Record<string,
       .select({
         metadata: projectSessions.metadata,
         parentSessionId: projectSessions.parentSessionId,
-        projectMetadata: projects.metadata,
+        projectMetadata: projectsView.metadata,
         spaceId: projectSpaces.spaceId,
         kind: projectSpaces.kind,
         slug: projectSpaces.slug,
         dmAgentName: projectSpaces.dmAgentName,
       })
       .from(projectSessions)
-      .leftJoin(projects, eq(projects.projectId, projectSessions.projectId))
+      .leftJoin(projectsView, eq(projectsView.projectId, projectSessions.projectId))
       .leftJoin(projectSpaces, eq(projectSpaces.spaceId, projectSessions.spaceId))
       .where(eq(projectSessions.sessionId, sessionId))
       .limit(1);
@@ -406,9 +408,10 @@ export async function buildSessionSandboxEnvVars(input: SessionSandboxEnvInput):
     }),
   );
   const secretsRead = started(
-    Promise.all([agentConfigRead, policyRead]).then(([{ agentGrantEnv }, { sessionPolicyRow, secretsPrincipalUserId }]) => {
+    Promise.all([agentConfigRead, policyRead]).then(async ([{ agentGrantEnv }, { sessionPolicyRow, secretsPrincipalUserId }]) => {
+      // My Kortix holds no secret; a colleague holds the ones a person allowed it (colleague-access.ts).
       const grantEnvForSession = input.platformMetaAgent
-        ? []
+        ? ((await readColleagueAccess(input.sessionId))?.secrets ?? [])
         : intersectSecretGrants(agentGrantEnv, sessionPolicyRow?.secretsAllowlist ?? null);
       return tl.span('secrets', () =>
         loadSessionRuntimeSecrets(input, secretsPrincipalUserId, grantEnvForSession, agentGrantEnv),

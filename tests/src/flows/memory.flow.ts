@@ -43,6 +43,7 @@ import type { Client, Res } from '../core/client';
 import { fail, type BodyAssert } from '../core/expect';
 import type { FlowContext } from '../core/types';
 import { AgentPrincipalsWorld, driveOf, hasStorage, openWorld } from '../fixtures/agent-principals';
+import { lockProjectFirst } from '../fixtures/token-binding-lock';
 
 const R = {
   layer: 'GET /v1/projects/:projectId/memory/layers/:layerKey',
@@ -68,16 +69,16 @@ const DRIVE_WRITE = 'PUT /v1/drives/:driveId/files/content';
 const STORAGE_PROBE = ['GET /v1/drives', 'POST /v1/drives/:driveId/files/mkdir', 'DELETE /v1/drives/:driveId/files'];
 const RESOURCE_GRANTS = 'POST /v1/projects/:projectId/resource-grants';
 
-const LAYER = '/v1/projects/:projectId/memory/layers/:layerKey';
-const PAGES = '/v1/projects/:projectId/memory/layers/:layerKey/pages';
-const NOTES = '/v1/projects/:projectId/memory/layers/:layerKey/notes';
-const PAGE = '/v1/projects/:projectId/memory/pages/:pageId';
-const HISTORY = '/v1/projects/:projectId/memory/pages/:pageId/history';
-const SEARCH = '/v1/projects/:projectId/memory/search';
-const USAGE = '/v1/projects/:projectId/sessions/:sessionId/memory-usage';
-const SPACES = '/v1/projects/:projectId/spaces';
-const SPACE = '/v1/projects/:projectId/spaces/:spaceId';
-const DM = '/v1/projects/:projectId/spaces/dm';
+const LAYER = '/v1/workspaces/:projectId/memory/layers/:layerKey';
+const PAGES = '/v1/workspaces/:projectId/memory/layers/:layerKey/pages';
+const NOTES = '/v1/workspaces/:projectId/memory/layers/:layerKey/notes';
+const PAGE = '/v1/workspaces/:projectId/memory/pages/:pageId';
+const HISTORY = '/v1/workspaces/:projectId/memory/pages/:pageId/history';
+const SEARCH = '/v1/workspaces/:projectId/memory/search';
+const USAGE = '/v1/workspaces/:projectId/sessions/:sessionId/memory-usage';
+const SPACES = '/v1/workspaces/:projectId/spaces';
+const SPACE = '/v1/workspaces/:projectId/spaces/:spaceId';
+const DM = '/v1/workspaces/:projectId/spaces/dm';
 /** Routes the files model removed: each answers 404 (no handler). */
 const REMOVED = [
   ['POST', '/v1/projects/:projectId/memory/remember'],
@@ -117,11 +118,11 @@ async function thread(
      VALUES ($1::uuid, $1, $2, $3, 'active')`,
     [sessionId, world.accountId, world.projectId],
   );
-  const minted = (await world.owner.post('/v1/projects/:projectId/cli-token', { name: ctx.fixtures.name('memory') }, { params: { projectId: world.projectId } }))
+  const minted = (await world.owner.post('/v1/workspaces/:projectId/cli-token', { name: ctx.fixtures.name('memory') }, { params: { projectId: world.projectId } }))
     .status(201)
     .json<{ token_id: string; secret_key: string }>();
   world.tokens.push(minted.token_id);
-  await world.db.query('UPDATE kortix.account_tokens SET session_id = $2 WHERE token_id = $1::uuid', [minted.token_id, sessionId]);
+  await world.db.query(lockProjectFirst('UPDATE kortix.account_tokens SET session_id = $2 WHERE token_id = $1::uuid'), [minted.token_id, sessionId]);
   // The person a session acts for (`on_behalf_of`): a human-started session's token carries it.
   if (opts.onBehalfOf) await world.db.query('UPDATE kortix.account_tokens SET on_behalf_of_user_id = $2::uuid WHERE token_id = $1::uuid', [minted.token_id, opts.onBehalfOf]);
   return { sessionId, client: ctx.client.withBearer(minted.secret_key, `thread ${sessionId.slice(0, 8)}`) };
@@ -475,9 +476,9 @@ flow('MEMORY-12', flowMeta('memory', [R.usage, FEATURES, SPACE_CREATE, TOKEN_MIN
   }
 });
 
-const FEATURES_PATH = '/v1/projects/:projectId/features';
-const ONBOARDING = '/v1/projects/:projectId/onboarding/channels';
-const MARKS = '/v1/projects/:projectId/onboarding/channels/marks';
+const FEATURES_PATH = '/v1/workspaces/:projectId/features';
+const ONBOARDING = '/v1/workspaces/:projectId/onboarding/channels';
+const MARKS = '/v1/workspaces/:projectId/onboarding/channels/marks';
 const ONBOARDING_ROUTES = ['GET /v1/projects/:projectId/onboarding/channels', 'POST /v1/projects/:projectId/onboarding/channels/marks'];
 const SPACE_LIST = 'GET /v1/projects/:projectId/spaces';
 
@@ -498,7 +499,8 @@ flow(
     // A DM runs its agent: the member needs the agent's run grant to open one.
     await world.grantRun('worker', member);
     // An account member with no access to this project: never on its roster.
-    const outsider = await team.addMember('member');
+    // Membership is access (design.md C3): the outsider is a person outside the workspace.
+    const outsider = await ctx.fixtures.user({ label: 'MEM16-OUTSIDER' });
     const asMember = ctx.client.as(member);
     const stateOf = async (client: Client) => read<ChannelsOnboarding>((await client.get(ONBOARDING, { params })).status(200), (b) => b.schema(ChannelsOnboardingSchema));
     const mark = (client: Client, value: string) => client.post(MARKS, { mark: value }, { params });
@@ -618,7 +620,7 @@ flow(
       await ctx.step('the intro is marked for project members only: the owner and the member, never the account member without project access', async () => {
         const marked = await introMarks();
         for (const userId of [world.ownerUserId, member.userId!]) if (!marked.includes(userId)) fail('a project member has no intro mark', { userId, marked });
-        if (marked.includes(outsider.userId!)) fail('an account member without project access got an intro mark', marked);
+        if (marked.includes(outsider.userId!)) fail('a person outside the workspace got an intro mark', marked);
         (await ctx.client.as(outsider).get(ONBOARDING, { params })).status([403, 404]);
       });
     } finally {
@@ -633,8 +635,8 @@ const MINE = {
   save: 'PUT /v1/projects/:projectId/memory/me/agent/:agent/pages/:name',
   forget: 'DELETE /v1/projects/:projectId/memory/me/agent/:agent/pages/:name',
 } as const;
-const MINE_INDEX = '/v1/projects/:projectId/memory/me/agent/:agent';
-const MINE_PAGE = '/v1/projects/:projectId/memory/me/agent/:agent/pages/:name';
+const MINE_INDEX = '/v1/workspaces/:projectId/memory/me/agent/:agent';
+const MINE_PAGE = '/v1/workspaces/:projectId/memory/me/agent/:agent/pages/:name';
 const FACT = { description: 'Wants replies of one to three sentences', type: 'feedback', body: 'Keep replies short.\n\n**Why:** reads on a phone.\n\n**How to apply:** one to three sentences.' };
 
 flow('MEMORY-17', flowMeta('memory', [...Object.values(MINE), FEATURES, TOKEN_MINT, ...STORAGE_PROBE], { timeoutMs: 180_000 }), async (ctx) => {

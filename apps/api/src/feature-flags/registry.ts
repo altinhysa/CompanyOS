@@ -28,9 +28,9 @@
  *      typechecked; a missing array entry compiles fine.
  *   4. Another hand-written copy in that package's projects.test.ts
  *   5. An entry below, DECLARING its enforcement mode
- *   6. One `useFeatureFlag` call + one map entry in
- *      packages/ui/src/internal/lib/use-project-feature-flags.ts (and move the trailing
- *      `isLoading:` to the newly-last hook)
+ *   6. One map entry: the served-key list is one line per new key in
+ *      packages/sdk/src/react/use-feature-flag.ts (`useFeatureFlags`); every
+ *      other copy — gate reads, `requiresFlag`, the palette map — derives from it.
  *
  * Then gate its routes with `requireFeatureFlag` (enforcement: 'routes'), or
  * its runtime behavior on `resolveFeatureFlag` (enforcement: 'behavioral').
@@ -102,7 +102,7 @@
  * entry names the release and the spec section that ends it.
  *
  * The same state also serves INTERNAL-ONLY surfaces (`workspace_volume`):
- * not offered in Settings, enabled per project by a
+ * not offered in Settings, on by the operator default or per project by a
  * Kortix operator on request. Their 403 says "contact Kortix" instead of
  * naming a toggle the caller cannot see (gate.ts).
  */
@@ -260,7 +260,7 @@ const FLAGS: readonly FeatureFlagDef[] = [
     key: 'us_region',
     name: 'US Region',
     description:
-      "Place this project's Files and newly provisioned Platinum sandboxes in the configured US region instead of the provider's home region. Files stay in the region where they were created, and every new sandbox runs where the project's Files live, so changing this setting after the Files exist does not move them or their sessions. Existing sandboxes keep their region, including on restart. This changes compute and Files placement, not API, database, or archive residency. A new sandbox image is copied to the region before sessions use it.",
+      "Place this workspace's Files and newly provisioned Platinum sandboxes in the configured US region instead of the provider's home region. Files stay in the region where they were created, and every new sandbox runs where the workspace's Files live, so changing this setting after the Files exist does not move them or their sessions. Existing sandboxes keep their region, including on restart. This changes compute and Files placement, not API, database, or archive residency. A new sandbox image is copied to the region before sessions use it.",
     stability: 'experimental',
     // Two operator gates: Platinum must be the configured provider, and the
     // environment must name the region (KORTIX_PLATINUM_US_REGION), which is
@@ -419,20 +419,24 @@ const FLAGS: readonly FeatureFlagDef[] = [
     // The key keeps its name: it is in the SDK's FeatureFlagKey and stored on projects.
     name: 'Stateless sandboxes',
     description:
-      "Every new Platinum session keeps only /workspace, on its own Platinum volume, so the sandbox is disposable: one stopped for an hour (KORTIX_SANDBOX_IDLE_DELETE_MINUTES) is deleted, and the next open boots a new sandbox on the same files and conversation. Programs that ran in the old sandbox are not running, and the agent is told so. Not a Settings toggle: Kortix enables it per project.",
+      "Every new Platinum session keeps only /workspace, on its own Platinum volume, so the sandbox is disposable: one stopped for an hour (KORTIX_SANDBOX_IDLE_DELETE_MINUTES) is deleted, and the next open boots a new sandbox on the same files and conversation. Programs that ran in the old sandbox are not running, and the agent is told so. Not a Settings toggle: Kortix turns it on.",
     stability: 'experimental',
     // Every workspace volume is a Platinum volume.
     available: () => Boolean(config.PLATINUM_API_KEY),
-    platformDefault: () => false,
-    // Internal-only: stateless sandboxes roll out project by project. A Kortix
-    // operator sets it (PUT /v1/admin/api/projects/:id/features).
+    // Off unless the operator sets KORTIX_WORKSPACE_VOLUMES=on (dev does,
+    // deploy-dev.yml). Self-host leaves it unset.
+    platformDefault: () => workspaceVolumesSwitch() === 'on',
+    // Internal-only, never a Settings toggle. A Kortix operator sets one
+    // project's choice (PUT /v1/admin/api/projects/:id/features); `false` keeps
+    // that project off while the default is on.
     catalogHidden: true,
     enforcement: 'behavioral',
     enforcementNote:
       'BEHAVIORAL only. Read once per session, at POST /sessions (platform/services/workspace-volume.ts): on, a ' +
       'Platinum session is inserted with `metadata.workspace_volume` and every box it ever gets mounts volume ' +
       'kws-<session_id> at /workspace, in the region the volume was created in, with KORTIX_WORKSPACE_VOLUME=1 and ' +
-      'the session-log restore on. Turning the flag off changes no session that has a volume; ' +
+      'the session-log restore on. Turning the flag off changes no session that has a volume. ' +
+      'KORTIX_WORKSPACE_VOLUMES=on makes it the default for every project without its own choice; ' +
       'KORTIX_WORKSPACE_VOLUMES=off stops new volumes everywhere. A box stopped longer than ' +
       'KORTIX_SANDBOX_IDLE_DELETE_MINUTES (default 60) is deleted (projects/reaping/idle-volume-retire.ts). The ' +
       'volume is deleted with the session content: by the retention purge after the trash window ' +
@@ -442,7 +446,7 @@ const FLAGS: readonly FeatureFlagDef[] = [
     key: 'session_groups',
     name: 'Session groups',
     description:
-      "Group the sidebar's sessions into named folders that everyone in the project shares, for example one per store or client. Move a session into a group from its menu or by dragging it; reorder and collapse the groups.",
+      "Group the sidebar's sessions into named folders that everyone in the workspace shares, for example one per store or client. Move a session into a group from its menu or by dragging it; reorder and collapse the groups.",
     stability: 'experimental',
     wip: true,
     available: () => true,
@@ -674,6 +678,18 @@ export function buildFeatureFlagCatalog(metadata: unknown): FeatureFlagView[] {
       scope: 'project' as const,
     }];
   });
+}
+
+/**
+ * KORTIX_WORKSPACE_VOLUMES: `on` (or 1/true/yes) makes `workspace_volume` the
+ * default for a project without its own choice; `off` (or 0/false/no) gives
+ * no new session a volume; unset or anything else leaves it to each project.
+ */
+export function workspaceVolumesSwitch(): 'on' | 'off' | null {
+  const value = (config.KORTIX_WORKSPACE_VOLUMES ?? '').trim().toLowerCase();
+  if (/^(1|on|true|yes)$/.test(value)) return 'on';
+  if (/^(0|off|false|no)$/.test(value)) return 'off';
+  return null;
 }
 
 /** True when only a platform operator may write this flag. */

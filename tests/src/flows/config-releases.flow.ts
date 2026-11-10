@@ -27,6 +27,7 @@ import {
 } from '../fixtures/session-run';
 import { withTransientGitRetry } from '../fixtures/git-transient';
 import { isKe2eRetryableError, transientRetryDelayMs } from '../core/client';
+import { lockProjectFirst } from '../fixtures/token-binding-lock';
 
 /**
  * `fetch` for the idempotent reads and descriptor mints of this file. Bun
@@ -379,9 +380,9 @@ async function setup(ctx: FlowContext): Promise<Fixture> {
       );
       // Bind the API-minted credential exactly as the sandbox's KORTIX_TOKEN is bound.
       await db.query(
-        `UPDATE kortix.account_tokens
+        lockProjectFirst(`UPDATE kortix.account_tokens
             SET account_id = $2, user_id = $3, project_id = $4, session_id = $5, agent_grant = $6::jsonb
-          WHERE token_id = $1`,
+          WHERE token_id = $1`),
         [
           tokenId,
           team.id,
@@ -802,7 +803,7 @@ flow(
     domain: 'config-releases',
     requires: ['database'],
     timeoutMs: 180_000,
-    routes: [MINT, DESCRIPTOR, ARCHIVE, 'POST /v1/projects/:projectId/secrets', ...GIT_PROXY],
+    routes: [MINT, DESCRIPTOR, ARCHIVE, 'POST /v1/workspaces/:projectId/secrets', ...GIT_PROXY],
   },
   async (ctx) => {
     const { randomBytes } = await import('node:crypto');
@@ -813,7 +814,7 @@ flow(
         const r = await ctx.client
           .as(ctx.P.OWNER)
           .post(
-            '/v1/projects/:projectId/secrets',
+            '/v1/workspaces/:projectId/secrets',
             { name: 'KE2E_CFG_SECRET', value },
             { params: { projectId: fixture.projectId } },
           );
@@ -1043,7 +1044,7 @@ flow(
       const generation = randomUUID();
       let newTip = '';
       await ctx.step("the project repository is replaced by a second project's repository with a new generation", async () => {
-        // OWNER's funded personal account: the free team account holds one project.
+        // OWNER's funded account: the free team account holds one project.
         const other = await ctx.fixtures.project({ managedGit: true });
         const otherRepo = await fixture.openRepo(other.id);
         newTip = await commitTo(
@@ -1224,7 +1225,7 @@ flow(
       const own = await fixture.mint();
 
       await ctx.step('the project reports no `config_releases` flag at all', async () => {
-        const r = await ctx.client.as(ctx.P.OWNER).get('/v1/projects/:projectId', { params: { projectId: fixture.projectId } });
+        const r = await ctx.client.as(ctx.P.OWNER).get('/v1/workspaces/:projectId', { params: { projectId: fixture.projectId } });
         r.status(200);
         const experimental = r.json<{ experimental: Record<string, boolean> }>().experimental;
         if ('config_releases' in experimental) {
@@ -1241,7 +1242,7 @@ flow(
         for (const enabled of [false, true, null]) {
           const r = await ctx.client
             .as(ctx.P.OWNER)
-            .patch('/v1/projects/:projectId/features', { feature: 'config_releases', enabled }, {
+            .patch('/v1/workspaces/:projectId/features', { feature: 'config_releases', enabled }, {
               params: { projectId: fixture.projectId },
             });
           r.status(400);
@@ -1593,7 +1594,7 @@ async function boxSession(ctx: FlowContext, fixture: Fixture) {
     async () => {
       const r = await ctx.client
         .as(ctx.P.OWNER)
-        .post('/v1/projects/:projectId/sessions/:sessionId/start', {}, {
+        .post('/v1/workspaces/:projectId/sessions/:sessionId/start', {}, {
           params: { projectId: fixture.projectId, sessionId },
           query: { wait_ms: '8000' },
           timeoutMs: 25_000,
@@ -1768,10 +1769,10 @@ harnessFlow(
     routes: [
       FEATURES,
       CONFIG_STATE,
-      'POST /v1/projects/:projectId/sessions',
-      'POST /v1/projects/:projectId/sessions/:sessionId/start',
-      'GET /v1/projects/:projectId/sessions/:sessionId/turn',
-      'GET /v1/projects/:projectId/sessions/:sessionId/transcript',
+      'POST /v1/workspaces/:projectId/sessions',
+      'POST /v1/workspaces/:projectId/sessions/:sessionId/start',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/turn',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/transcript',
       ...GIT_PROXY,
     ],
   },
@@ -1993,10 +1994,10 @@ harnessFlow(
     routes: [
       FEATURES,
       CONFIG_STATE,
-      'POST /v1/projects/:projectId/sessions',
-      'POST /v1/projects/:projectId/sessions/:sessionId/start',
-      'GET /v1/projects/:projectId/sessions/:sessionId/turn',
-      'GET /v1/projects/:projectId/sessions/:sessionId/transcript',
+      'POST /v1/workspaces/:projectId/sessions',
+      'POST /v1/workspaces/:projectId/sessions/:sessionId/start',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/turn',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/transcript',
       ...GIT_PROXY,
     ],
   },
@@ -2211,10 +2212,10 @@ flow(
       CONFIG_STATE,
       DESCRIPTOR,
       MINT,
-      'POST /v1/projects/:projectId/sessions',
-      'POST /v1/projects/:projectId/sessions/:sessionId/start',
-      'GET /v1/projects/:projectId/sessions/:sessionId/turn',
-      'GET /v1/projects/:projectId/sessions/:sessionId/transcript',
+      'POST /v1/workspaces/:projectId/sessions',
+      'POST /v1/workspaces/:projectId/sessions/:sessionId/start',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/turn',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/transcript',
       ...GIT_PROXY,
     ],
   },
@@ -2501,11 +2502,11 @@ harnessFlow(
     routes: [
       FEATURES,
       CONFIG_STATE,
-      'POST /v1/projects/:projectId/sessions',
-      'POST /v1/projects/:projectId/sessions/:sessionId/start',
-      'POST /v1/projects/:projectId/sessions/:sessionId/prompts',
-      'GET /v1/projects/:projectId/sessions/:sessionId/turn',
-      'GET /v1/projects/:projectId/sessions/:sessionId/transcript',
+      'POST /v1/workspaces/:projectId/sessions',
+      'POST /v1/workspaces/:projectId/sessions/:sessionId/start',
+      'POST /v1/workspaces/:projectId/sessions/:sessionId/prompts',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/turn',
+      'GET /v1/workspaces/:projectId/sessions/:sessionId/transcript',
       ...GIT_PROXY,
     ],
   },

@@ -1,8 +1,10 @@
-import { projects, projectSessions } from '@kortix/db';
+import { projectSessions } from '@kortix/db';
 import { eq } from 'drizzle-orm';
 import { logger } from '../../lib/logger';
 import { db } from '../../shared/db';
 import { reloadSessionConfig, type SessionReloadResult } from './session-reload';
+import { projectsView } from '../../workspaces/rows';
+import { errorMessage } from '../../shared/error-message';
 
 /**
  * Bring a session that just came back up onto its base branch's CURRENT config.
@@ -80,15 +82,15 @@ export interface SessionConfigConvergenceDeps {
 async function loadTarget(sessionId: string): Promise<SessionConfigConvergenceTarget | null> {
   const [row] = await db
     .select({
-      projectId: projects.projectId,
-      accountId: projects.accountId,
-      repoUrl: projects.repoUrl,
-      defaultBranch: projects.defaultBranch,
-      manifestPath: projects.manifestPath,
+      projectId: projectsView.projectId,
+      accountId: projectsView.accountId,
+      repoUrl: projectsView.repoUrl,
+      defaultBranch: projectsView.defaultBranch,
+      manifestPath: projectsView.manifestPath,
       baseRef: projectSessions.baseRef,
     })
     .from(projectSessions)
-    .innerJoin(projects, eq(projects.projectId, projectSessions.projectId))
+    .innerJoin(projectsView, eq(projectsView.projectId, projectSessions.projectId))
     .where(eq(projectSessions.sessionId, sessionId))
     .limit(1);
   if (!row) return null;
@@ -224,7 +226,7 @@ export async function convergeSessionConfig(
   } catch (error) {
     logger.warn('[projects] session config convergence threw', {
       session_id: sessionId,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     });
     return 'failed';
   }

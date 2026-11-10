@@ -956,6 +956,7 @@ describe('ProjectsLevelContent', () => {
         { day: '2026-07-01', llm_cost: 0, compute_cost: 0, total_cost: 0 },
         { day: '2026-07-02', llm_cost: 1, compute_cost: 1, total_cost: 2 },
         { day: '2026-07-03', llm_cost: 4, compute_cost: 4, total_cost: 8 },
+        { day: '2026-07-04', llm_cost: 0.1, compute_cost: 0, total_cost: 0.1 },
       ],
     };
     const html = renderContent({
@@ -965,17 +966,19 @@ describe('ProjectsLevelContent', () => {
         p1: [
           { day: '2026-07-02', llm_cost: 1, compute_cost: 1, total_cost: 2 },
           { day: '2026-07-03', llm_cost: 4, compute_cost: 4, total_cost: 8 },
+          { day: '2026-07-04', llm_cost: 0.1, compute_cost: 0, total_cost: 0.1 },
         ],
         p2: [],
       },
     });
     const strips = html.match(/<div role="img"[\s\S]*?<\/div>/g) ?? [];
     expect(strips).toHaveLength(2);
-    // Alpha: idle, a quarter of the peak (half on the square-root scale), the peak.
-    expect((strips[0]!.match(/<span /g) ?? []).length).toBe(3);
+    // Alpha: idle, a quarter of the peak (half on the square-root scale), the
+    // peak, and a tiny day that must still read as spend, not idle.
+    expect((strips[0]!.match(/<span /g) ?? []).length).toBe(4);
     expect(strips[0]).toContain('bg-muted');
     expect(strips[0]).toContain('bg-kortix-blue/40');
-    expect(strips[0]).toMatch(/bg-kortix-blue"/);
+    expect(strips[0]).toContain('bg-kortix-blue/25');
     expect(strips[0]).toMatch(/bg-kortix-blue"/);
     expect(strips[0]).toContain('aria-label="Alpha: 800 credits on Jul 3, the busiest day"');
     // Beta: no spend in the window, every cell the idle well.

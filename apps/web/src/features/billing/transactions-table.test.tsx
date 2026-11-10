@@ -162,6 +162,7 @@ describe('CreditActivityFeed renders a ledger row', () => {
 
   test('a tiny debit reads <0.01 with no sign', () => {
     expect(render([{ ...grant, id: 'led_7', type: 'usage', amount: -0.00001 }])).toContain('>&lt;0.01<');
+    expect(render([{ ...grant, id: 'led_8', type: 'refund', amount: 0.00001 }])).toContain('>+&lt;0.01<');
   });
 
   test('an empty ledger renders an empty list', () => {

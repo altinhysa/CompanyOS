@@ -97,14 +97,15 @@ export function shortenLedgerIds(description: string): string {
  * for any other (`Dec 30, 2025, 11:02 PM`), so two entries a year apart never
  * read the same. The full timestamp with its time zone is in the hint.
  */
+export function entryTimeFormatter(locale: string, currentYear: number) {
+  const base = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } as const;
+  const thisYear = new Intl.DateTimeFormat(locale, base);
+  const otherYear = new Intl.DateTimeFormat(locale, { ...base, year: 'numeric' });
+  return (date: Date) => (date.getFullYear() === currentYear ? thisYear : otherYear).format(date);
+}
+
 export function formatEntryTime(date: Date, currentYear: number, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    month: 'short',
-    day: 'numeric',
-    ...(date.getFullYear() === currentYear ? {} : { year: 'numeric' as const }),
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  return entryTimeFormatter(locale, currentYear)(date);
 }
 
 /** An expiring grant's recorded lapse date, or null when it has none. */
@@ -135,7 +136,8 @@ export function CreditActivityFeed({ rows }: { rows: CreditTransactionRow[] }) {
   const badges = localizeUiCatalog(TRANSACTION_BADGES, tI18nComplete, APP_REGISTRY_TRANSLATION_KEYS);
   const amountLabel = tI18nComplete.raw('text2a6b24ad2872');
   const balanceLabel = tHardcodedUi.raw('componentsBillingCreditTransactions.line200JsxTextCreditsAfter');
-  const currentYear = new Date().getFullYear();
+  // Two formatters per render, not one per row.
+  const formatTime = entryTimeFormatter(locale, new Date().getFullYear());
 
   return (
     <div className="bg-popover rounded-md border">
@@ -184,16 +186,19 @@ export function CreditActivityFeed({ rows }: { rows: CreditTransactionRow[] }) {
                 <p className="text-foreground truncate text-sm" title={title}>
                   {title}
                 </p>
-                <p className="text-muted-foreground truncate text-xs">
+                {/* The time sits outside the truncated span: `InlineMetaTime`
+                    is a focusable <time>, and `truncate` (overflow hidden)
+                    would cut off its focus ring. */}
+                <p className="text-muted-foreground flex min-w-0 gap-1 text-xs">
                   {created && !Number.isNaN(created.getTime()) ? (
-                    <>
+                    <span className="shrink-0">
                       <InlineMetaTime date={created} locale={locale}>
-                        {formatEntryTime(created, currentYear, locale)}
+                        {formatTime(created)}
                       </InlineMetaTime>
-                      {meta.length > 0 ? ' · ' : null}
-                    </>
+                      {meta.length > 0 ? ' ·' : null}
+                    </span>
                   ) : null}
-                  {meta.join(' · ')}
+                  <span className="min-w-0 truncate">{meta.join(' · ')}</span>
                 </p>
               </div>
               <span

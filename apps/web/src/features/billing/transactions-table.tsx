@@ -66,11 +66,12 @@ export function creditTransactionBadge(type: string): { label: string; variant: 
 
 /**
  * A ledger amount in credits with its sign: `+2,500`, `-125`. A debit too
- * small to show reads `<0.01` with no sign: `-<0.01` is two symbols for one
- * idea, and "less than a hundredth" already says it is tiny.
+ * small to show reads `<0.01` with no sign (`-<0.01` is two symbols for one
+ * idea); a credit that small keeps its `+`, so a tiny refund and a tiny
+ * charge still read differently.
  */
 export function formatSignedCredits(usd: number): string {
   const magnitude = formatUsdAsCredits(Math.abs(usd));
-  if (magnitude.startsWith('<')) return magnitude;
+  if (magnitude.startsWith('<')) return usd > 0 ? `+${magnitude}` : magnitude;
   return `${usd < 0 && magnitude !== '0' ? '-' : '+'}${magnitude}`;
 }

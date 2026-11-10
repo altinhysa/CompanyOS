@@ -8,7 +8,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { CreditActivityFeed } from './credit-activity-feed';
+import { TooltipProvider } from '@kortix/ui/tooltip';
+import { CreditActivityFeed, formatEntryTime } from './credit-activity-feed';
 import { creditTransactionBadge, type CreditTransactionRow } from './transactions-table';
 
 const dir = import.meta.dir;
@@ -77,7 +78,9 @@ describe('the shared ledger feed is the only implementation', () => {
 const render = (rows: CreditTransactionRow[]) =>
   renderToStaticMarkup(
     <NextIntlClientProvider locale="en" messages={{}} onError={() => {}}>
-      <CreditActivityFeed rows={rows} />
+      <TooltipProvider>
+        <CreditActivityFeed rows={rows} />
+      </TooltipProvider>
     </NextIntlClientProvider>,
   );
 
@@ -149,6 +152,18 @@ describe('CreditActivityFeed renders a ledger row', () => {
     expect(html).not.toContain('Expiring');
   });
 
+  test('both figures are named: one header for the eye, a label per row for a screen reader', () => {
+    const html = render([grant]);
+    expect(html).toContain('>Credits</span>');
+    expect(html).toContain('>Credits After</span>');
+    expect(html).toContain('<span class="sr-only">Credits </span>');
+    expect(html).toContain('<span class="sr-only">Credits After </span>');
+  });
+
+  test('a tiny debit reads <0.01 with no sign', () => {
+    expect(render([{ ...grant, id: 'led_7', type: 'usage', amount: -0.00001 }])).toContain('>&lt;0.01<');
+  });
+
   test('an empty ledger renders an empty list', () => {
     const html = render([]);
     expect(html).not.toContain('<li');
@@ -169,4 +184,12 @@ test('expiring grants show their recorded lapse date', () => {
     },
   ]);
   expect(html).toContain('Expiring Nov 24, 2026');
+});
+
+describe('formatEntryTime', () => {
+  const date = new Date('2025-12-30T10:00:00Z');
+  test('leaves the year out for this year and keeps it for any other', () => {
+    expect(formatEntryTime(date, 2025, 'en-US')).not.toContain('2025');
+    expect(formatEntryTime(date, 2026, 'en-US')).toContain('2025');
+  });
 });

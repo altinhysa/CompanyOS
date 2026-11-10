@@ -64,9 +64,13 @@ export function creditTransactionBadge(type: string): { label: string; variant: 
   return TRANSACTION_BADGES[type] ?? { label: type, variant: 'outline' };
 }
 
-// Hoisted so render does not rebuild the formatter per row — same fixed
-// locale and options as the previous inline `toLocaleString` call.
+/**
+ * A ledger amount in credits with its sign: `+2,500`, `-125`. A debit too
+ * small to show reads `<0.01` with no sign: `-<0.01` is two symbols for one
+ * idea, and "less than a hundredth" already says it is tiny.
+ */
 export function formatSignedCredits(usd: number): string {
   const magnitude = formatUsdAsCredits(Math.abs(usd));
+  if (magnitude.startsWith('<')) return magnitude;
   return `${usd < 0 && magnitude !== '0' ? '-' : '+'}${magnitude}`;
 }

@@ -434,7 +434,7 @@ function SpendStat({
   const tCredits = useTranslations('settings.credits');
   return (
     <div className="min-w-0">
-      <dt className="text-muted-foreground flex items-center gap-1.5 truncate text-xs">
+      <dt className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
         {color ? (
           <span
             aria-hidden="true"
@@ -442,7 +442,7 @@ function SpendStat({
             style={{ backgroundColor: color }}
           />
         ) : null}
-        {label}
+        <span className="min-w-0 truncate">{label}</span>
       </dt>
       <dd
         className={cn(

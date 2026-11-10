@@ -14,7 +14,9 @@ import { formatSessionCostCredits } from '@kortix/ui/internal/billing/session-co
  */
 const LEVEL_CLASS = [
   'bg-muted',
-  'bg-kortix-blue/15',
+  // /25, not the /15 status tint: on the dark surface /15 measured within a
+  // shade of the idle well, so a low-spend day read as no spend at all.
+  'bg-kortix-blue/25', // audit:allow sequential chart ramp step, not a status tint
   'bg-kortix-blue/40', // audit:allow sequential chart ramp step, not a status tint
   'bg-kortix-blue/70', // audit:allow sequential chart ramp step, not a status tint
   'bg-kortix-blue',

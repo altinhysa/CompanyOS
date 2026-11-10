@@ -12,6 +12,7 @@ import {
 } from '@phosphor-icons/react';
 
 import { cn } from '@kortix/ui';
+import { InlineMetaTime } from '@kortix/ui/inline-meta';
 import { APP_REGISTRY_TRANSLATION_KEYS } from '@kortix/ui/i18n/ui-catalog/app-registry-translation-keys.generated';
 import { localizeUiCatalog } from '@kortix/ui/i18n';
 import { formatUsdAsCredits } from '@kortix/shared';
@@ -91,13 +92,20 @@ export function shortenLedgerIds(description: string): string {
   return description.replace(UUID, '$1');
 }
 
-const DATE_TIME = (locale: string) =>
-  new Intl.DateTimeFormat(locale, {
+/**
+ * When an entry happened, short: `Nov 10, 06:30 PM` this year, with the year
+ * for any other (`Dec 30, 2025, 11:02 PM`), so two entries a year apart never
+ * read the same. The full timestamp with its time zone is in the hint.
+ */
+export function formatEntryTime(date: Date, currentYear: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
     month: 'short',
     day: 'numeric',
+    ...(date.getFullYear() === currentYear ? {} : { year: 'numeric' as const }),
     hour: '2-digit',
     minute: '2-digit',
-  });
+  }).format(date);
+}
 
 /** An expiring grant's recorded lapse date, or null when it has none. */
 function formatLapse(expiresAt: string | null | undefined, locale: string): string | null {
@@ -125,60 +133,86 @@ export function CreditActivityFeed({ rows }: { rows: CreditTransactionRow[] }) {
   const tI18nComplete = useTranslations('hardcodedUi.i18nComplete');
   const locale = useLocale();
   const badges = localizeUiCatalog(TRANSACTION_BADGES, tI18nComplete, APP_REGISTRY_TRANSLATION_KEYS);
-  const dateTime = DATE_TIME(locale);
+  const amountLabel = tI18nComplete.raw('text2a6b24ad2872');
+  const balanceLabel = tHardcodedUi.raw('componentsBillingCreditTransactions.line200JsxTextCreditsAfter');
+  const currentYear = new Date().getFullYear();
 
   return (
-    <ul className="bg-popover divide-border divide-y rounded-md border">
-      {rows.map((row) => {
-        const kind = creditActivityKind(row.type, row.description);
-        const { tile, glyph, Icon } =
-          row.type === 'expired'
-            ? { ...KIND_STYLE.other, Icon: ClockCounterClockwiseIcon }
-            : KIND_STYLE[kind];
-        const label = (badges[row.type] ?? creditTransactionBadge(row.type)).label;
-        const title = row.description
-          ? shortenLedgerIds(row.description)
-          : tHardcodedUi.raw('i18nComplete.textbcd8cc53f40e');
-        const meta = [
-          row.createdAt ? dateTime.format(new Date(row.createdAt)) : null,
-          label,
-          row.isExpiring === undefined
-            ? null
-            : row.isExpiring
-              ? [tI18nComplete.raw('textff44a401445c'), formatLapse(row.expiresAt, locale)]
-                  .filter(Boolean)
-                  .join(' ')
-              : tI18nComplete.raw('text455a95491f40'),
-        ].filter(Boolean);
+    <div className="bg-popover rounded-md border">
+      {/* One header names the two figures at the end of every row, from `sm`
+          where both show. Each row repeats the names for a screen reader. */}
+      <div
+        aria-hidden="true"
+        className="border-border text-muted-foreground hidden items-center gap-3 border-b px-4 py-2 text-xs sm:flex"
+      >
+        <span className="flex-1" />
+        <span className="shrink-0 text-right">{amountLabel}</span>
+        <span className="w-24 shrink-0 text-right">{balanceLabel}</span>
+      </div>
+      <ul className="divide-border divide-y">
+        {rows.map((row) => {
+          const kind = creditActivityKind(row.type, row.description);
+          const { tile, glyph, Icon } =
+            row.type === 'expired'
+              ? { ...KIND_STYLE.other, Icon: ClockCounterClockwiseIcon }
+              : KIND_STYLE[kind];
+          const label = (badges[row.type] ?? creditTransactionBadge(row.type)).label;
+          const title = row.description
+            ? shortenLedgerIds(row.description)
+            : tHardcodedUi.raw('i18nComplete.textbcd8cc53f40e');
+          const created = row.createdAt ? new Date(row.createdAt) : null;
+          const meta = [
+            label,
+            row.isExpiring === undefined
+              ? null
+              : row.isExpiring
+                ? [tI18nComplete.raw('textff44a401445c'), formatLapse(row.expiresAt, locale)]
+                    .filter(Boolean)
+                    .join(' ')
+                : tI18nComplete.raw('text455a95491f40'),
+          ].filter(Boolean);
 
-        return (
-          <li key={row.id} className="flex items-center gap-3 px-4 py-3">
-            <span
-              aria-hidden="true"
-              className={cn('flex size-9 shrink-0 items-center justify-center rounded-sm', tile)}
-            >
-              <Icon weight="fill" className={cn('size-4', glyph)} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-foreground truncate text-sm" title={title}>
-                {title}
-              </p>
-              <p className="text-muted-foreground truncate text-xs">{meta.join(' · ')}</p>
-            </div>
-            <span
-              className={cn(
-                'text-foreground shrink-0 text-sm tabular-nums',
-                row.amount > 0 && 'font-medium',
-              )}
-            >
-              {formatSignedCredits(row.amount)}
-            </span>
-            <span className="text-muted-foreground hidden w-24 shrink-0 text-right text-xs tabular-nums sm:block">
-              {formatUsdAsCredits(row.balanceAfter)}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+          return (
+            <li key={row.id} className="flex items-center gap-3 px-4 py-3">
+              <span
+                aria-hidden="true"
+                className={cn('flex size-9 shrink-0 items-center justify-center rounded-sm', tile)}
+              >
+                <Icon weight="fill" className={cn('size-4', glyph)} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-foreground truncate text-sm" title={title}>
+                  {title}
+                </p>
+                <p className="text-muted-foreground truncate text-xs">
+                  {created && !Number.isNaN(created.getTime()) ? (
+                    <>
+                      <InlineMetaTime date={created} locale={locale}>
+                        {formatEntryTime(created, currentYear, locale)}
+                      </InlineMetaTime>
+                      {meta.length > 0 ? ' · ' : null}
+                    </>
+                  ) : null}
+                  {meta.join(' · ')}
+                </p>
+              </div>
+              <span
+                className={cn(
+                  'text-foreground shrink-0 text-sm tabular-nums',
+                  row.amount > 0 && 'font-medium',
+                )}
+              >
+                <span className="sr-only">{amountLabel} </span>
+                {formatSignedCredits(row.amount)}
+              </span>
+              <span className="text-muted-foreground hidden w-24 shrink-0 text-right text-xs tabular-nums sm:block">
+                <span className="sr-only">{balanceLabel} </span>
+                {formatUsdAsCredits(row.balanceAfter)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

@@ -68,10 +68,11 @@ export function AccountStorageSection({ accountId }: { accountId: string | undef
   );
 }
 
-/** Ring fill by how full a folder is: blue while there is room, orange near
- *  the limit, red at it. The same three states `storageTone` reports. */
+/** Ring fill by how full a folder is: the Storage purple the rest of the
+ *  Usage page gives storage while there is room, orange near the limit, red at
+ *  it. The same three states `storageTone` reports. */
 const RING_TONE_COLOR = {
-  ok: 'var(--kortix-blue)',
+  ok: 'var(--kortix-purple)',
   near: 'var(--kortix-orange)',
   full: 'var(--kortix-red)',
 } as const;

@@ -976,6 +976,7 @@ describe('ProjectsLevelContent', () => {
     expect(strips[0]).toContain('bg-muted');
     expect(strips[0]).toContain('bg-kortix-blue/40');
     expect(strips[0]).toMatch(/bg-kortix-blue"/);
+    expect(strips[0]).toMatch(/bg-kortix-blue"/);
     expect(strips[0]).toContain('aria-label="Alpha: 800 credits on Jul 3, the busiest day"');
     // Beta: no spend in the window, every cell the idle well.
     expect(strips[1]).toContain('aria-label="Beta: no spend in this range"');

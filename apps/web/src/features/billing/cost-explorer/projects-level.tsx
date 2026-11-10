@@ -418,9 +418,9 @@ export function ProjectsLevelContent({
       <Table>
         <TableHeader>
           <TableRow>
-            {/* Only Project and Total are sortable — those are the two the
-                route can order by (see `ProjectSortColumn`). Sessions, LLM,
-                Compute and Storage stay plain `TableHead`s rather than dead controls. */}
+            {/* Only Workspace and Total are sortable, the two the route can order
+                by (see `ProjectSortColumn`). Daily spend and Sessions stay plain
+                `TableHead`s rather than dead controls. */}
             <CostSortHeader
               label={tI18nComplete.raw('text985959785319')}
               direction={projectSortDirection(sort, 'name')}
@@ -465,7 +465,14 @@ export function ProjectsLevelContent({
                     {tCredits('idleWorkspaces', { count: idleCount })}
                   </span>
                   {onToggleIdle ? (
-                    <Button type="button" variant="ghost" size="sm" onClick={onToggleIdle}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={onToggleIdle}
+                      aria-expanded={showIdle}
+                      aria-label={`${showIdle ? tCredits('hideIdle') : tCredits('showIdle')}: ${tCredits('idleWorkspaces', { count: idleCount })}`}
+                    >
                       {showIdle ? tCredits('hideIdle') : tCredits('showIdle')}
                     </Button>
                   ) : null}

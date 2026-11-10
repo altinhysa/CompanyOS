@@ -15,7 +15,8 @@
  *    as its parts (base, variable, founding equity): the founder has not
  *    published numbers. Locations are per opening and come from the founder
  *    (2026-11-10): MTS and FDE in **Belgrade, Serbia** or **Remote**; both
- *    founding GTM roles in the **US**, New York or San Francisco, in person.
+ *    founding GTM roles in the **US**: Enterprise based in New York,
+ *    Developers based in San Francisco, US remote possible for both.
  *  - The openings are the founder's own list and order: Founding GTM
  *    (Enterprise), Founding GTM (Developers), MTS, FDE. The board shows the
  *    role and its location only, no summary line. The GTM role pages carry
@@ -36,7 +37,8 @@
  */
 
 const TECH_LOCATION = 'Belgrade, Serbia · Remote';
-const GTM_LOCATION = 'US · New York or San Francisco';
+const ENTERPRISE_LOCATION = 'New York · US remote';
+const DEVELOPERS_LOCATION = 'San Francisco · US remote';
 
 export const hero = {
   title: 'Open positions.',
@@ -68,14 +70,14 @@ export const openings: readonly {
     id: 'gtm-enterprise',
     name: 'Founding GTM',
     full: 'Enterprise',
-    location: GTM_LOCATION,
+    location: ENTERPRISE_LOCATION,
     href: '/careers/gtm-enterprise',
   },
   {
     id: 'gtm-developers',
     name: 'Founding GTM',
     full: 'Developers',
-    location: GTM_LOCATION,
+    location: DEVELOPERS_LOCATION,
     href: '/careers/gtm-developers',
   },
   {
@@ -95,7 +97,6 @@ export const openings: readonly {
 /** What every founding GTM role page shows the same way. */
 const gtmFacts = {
   reportsTo: { k: 'Reports to', v: 'Marko Kraemer, CEO' },
-  location: { k: 'Location', v: 'US: New York or San Francisco, in person' },
   pay: { k: 'Compensation', v: 'Base salary, variable pay and founding equity' },
 } as const;
 
@@ -181,12 +182,12 @@ export const roles: Record<RoleSlug, RolePage> = {
   'gtm-enterprise': {
     hero: {
       title: 'Founding GTM, Enterprise.',
-      titleMuted: 'New York or San Francisco.',
+      titleMuted: 'New York, or remote in the US.',
       sub: 'The first go-to-market hire for the companies that must own their AI. You take Kortix from founder-led sales to an enterprise business, and you have done it before.',
     },
     facts: [
       gtmFacts.reportsTo,
-      gtmFacts.location,
+      { k: 'Location', v: 'Based in New York. US remote possible.' },
       gtmFacts.pay,
       { k: 'Title', v: 'Founding GTM Lead, Head of GTM or CBO. Your pick.' },
     ],
@@ -297,18 +298,18 @@ export const roles: Record<RoleSlug, RolePage> = {
     meta: {
       title: 'Founding GTM, Enterprise — Kortix careers',
       description:
-        'The first enterprise go-to-market hire at Kortix: 0 to 1 GTM, enterprise sales, consultancy and partnerships. New York or San Francisco, US.',
+        'The first enterprise go-to-market hire at Kortix: 0 to 1 GTM, enterprise sales, consultancy and partnerships. New York or US remote.',
     },
   },
   'gtm-developers': {
     hero: {
       title: 'Founding GTM, Developers.',
-      titleMuted: 'New York or San Francisco.',
+      titleMuted: 'San Francisco, or remote in the US.',
       sub: 'You turn the open-source audience into teams that run real work on Kortix and pay for it. Product-led growth and developer relations, in one seat.',
     },
     facts: [
       gtmFacts.reportsTo,
-      gtmFacts.location,
+      { k: 'Location', v: 'Based in San Francisco. US remote possible.' },
       gtmFacts.pay,
       { k: 'Title', v: 'Founding GTM Lead or Head of Growth. Your pick.' },
     ],
@@ -414,7 +415,7 @@ export const roles: Record<RoleSlug, RolePage> = {
     meta: {
       title: 'Founding GTM, Developers — Kortix careers',
       description:
-        'The first developer and product-led growth hire at Kortix: the funnel, activation, launches and community. New York or San Francisco, US.',
+        'The first developer and product-led growth hire at Kortix: the funnel, activation, launches and community. San Francisco or US remote.',
     },
   },
 };

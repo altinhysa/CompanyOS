@@ -152,7 +152,7 @@ function whoamiJson(
   active: AccountMembership | undefined,
   def: DefaultProjectRef | null,
 ): void {
-  emitJson({
+  const identity = {
     host: resolvedHost ?? null,
     url: auth.api_base,
     user_id: me.user_id,
@@ -160,18 +160,62 @@ function whoamiJson(
     workspace_id: boundWorkspaceId(me) ?? def?.project_id ?? null,
     account_id: active?.account_id ?? auth.account_id ?? null,
     account: active ?? null,
-    // Every membership inline made the payload unbounded: a member of hundreds
-    // of workspaces (the e2e fixtures' owner holds 487) blew past the MCP kortix
-    // tool's 45k stdout cap, so `--json` arrived cut and its json field was
-    // gone — the tool's own denial table sends identity lookups here, and the
-    // CLI contract (`kortix whoami --json | jq`) needs the whole value. The
-    // array keeps its shape and caps the rows; accounts_total says how many
-    // memberships exist, and the full list stays at GET /accounts/me.
-    accounts: me.accounts.slice(0, 50),
-    accounts_total: me.accounts.length,
     token_context: me.token_context ?? null,
     default_project: def,
+  };
+  emitJson(boundedAccountsPayload(identity, me.accounts));
+}
+
+/** The `--json` payload: the identity fields plus the bounded memberships. */
+export interface MePayload {
+  host: string | null;
+  url: string;
+  user_id: string;
+  user_email: string | null;
+  workspace_id: string | null;
+  account_id: string | null;
+  account: AccountMembership | null;
+  accounts: AccountMembership[];
+  accounts_total: number;
+  token_context: MeResponse['token_context'] | null;
+  default_project: DefaultProjectRef | null;
+}
+
+/** The MCP kortix tool's stdout capture limit (apps/api/src/mcp/cli.ts). */
+export const MCP_STDOUT_BYTE_CAP = 45_000;
+
+/**
+ * The MCP kortix tool (apps/api/src/mcp/cli.ts `STDOUT_CAP = 45 000`) captures
+ * a command's stdout in BYTES, and its denial table answers identity lookups
+ * with `whoami --json`, which must arrive whole — a cut payload loses the
+ * tool's parsed `json` field (the gate's MCP-6 flow). A row-count cap is not
+ * a byte cap: a membership name holds up to 255 characters
+ * (apps/api/src/accounts/core/account-name.ts) and a stored row predates
+ * that boundary, so 50 rows can cost a real share of 45 000 bytes. The
+ * memberships ride `accounts` only while the WHOLE payload's UTF-8 length
+ * stays inside the tool's capture: rows are dropped from the end (a stable
+ * prefix, never reordered) until it fits, and `accounts_total` keeps the true
+ * count beside the bounded list. The uncapped list stays one
+ * `accounts ls --json` call away (GET /accounts/me).
+ */
+export function boundedAccountsPayload(
+  identity: Omit<MePayload, 'accounts' | 'accounts_total'>,
+  accounts: AccountMembership[],
+): MePayload {
+  const bytes = (value: string): number => new TextEncoder().encode(value).length;
+  const payloadOf = (keep: number): MePayload => ({
+    ...identity,
+    accounts: accounts.slice(0, keep),
+    accounts_total: accounts.length,
   });
+  let keep = accounts.length;
+  let payload = payloadOf(keep);
+  // `+ 1`: `emitJson` writes the trailing newline the capture also counts.
+  while (bytes(JSON.stringify(payload, null, 2)) + 1 > MCP_STDOUT_BYTE_CAP && keep > 0) {
+    keep = keep > 1 ? Math.max(1, Math.floor(keep / 2)) : keep - 1;
+    payload = payloadOf(keep);
+  }
+  return payload;
 }
 
 /** The `--token-only` rendering: just the active token's context block. */

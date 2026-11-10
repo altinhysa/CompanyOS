@@ -68,15 +68,15 @@ export const openings: readonly {
 }[] = [
   {
     id: 'gtm-enterprise',
-    name: 'Founding GTM',
-    full: 'Enterprise',
+    name: 'Founding GTM Enterprise',
+    full: 'Founding Go-to-Market, Enterprise',
     location: ENTERPRISE_LOCATION,
     href: '/careers/gtm-enterprise',
   },
   {
     id: 'gtm-developers',
-    name: 'Founding GTM',
-    full: 'Developers',
+    name: 'Founding GTM Developers',
+    full: 'Founding Go-to-Market, Developers',
     location: DEVELOPERS_LOCATION,
     href: '/careers/gtm-developers',
   },

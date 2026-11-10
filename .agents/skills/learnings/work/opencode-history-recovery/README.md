@@ -1,6 +1,6 @@
 ---
 title: Recover OpenCode-era conversations that never reached the session log
-status: prod Platinum done 2026-11-10 (6,258 of 6,425 written); 10 left for the todo-status fix and an 8 GB cap; Daytona written off (key revoked, owner decision)
+status: done and removed. Prod Platinum recovered (numbers under Status); Daytona written off; the script was deleted from the tree by the PR that set this status (restore it from git history: `git show 550757a87b:apps/api/src/scripts/recover-opencode-history.ts`)
 owner: platform
 updated: 2026-11-10
 ---
@@ -81,6 +81,10 @@ candidate filter takes those `invalid` rows (detail `todos.…`) again, up to 3
 attempts.
 
 ## Runbook
+
+The script is no longer in the tree. To run it again, restore the 9 files
+from `550757a87b` (`apps/api/src/scripts/recover-opencode-history.ts` and the
+folder beside it) on a branch, ship them in a release, then follow this runbook.
 
 Run it as a one-off ECS task of the environment (the worker task definition: its
 env, IAM and VPC), never on a laptop for prod: the files are customer data.
